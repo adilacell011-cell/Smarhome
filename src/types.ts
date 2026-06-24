@@ -10,6 +10,7 @@ export type WizLampConfig = {
   name: string;
   ip: string;
   port: string;
+  group?: string;
 };
 
 export type CctvConfig = {

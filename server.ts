@@ -1,7 +1,33 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import net from "net";
 import { createServer as createViteServer } from "vite";
+
+// Helper function to check if a TCP port is open (Ping substitute for port-level verification)
+function checkTcpPort(port: number, host: string, timeout = 1200): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(timeout);
+    
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    
+    socket.connect(port, host);
+  });
+}
 
 const CONFIG_DIR = path.join(process.cwd(), "config");
 const CONFIG_PATH = path.join(CONFIG_DIR, "device-config.json");
@@ -134,6 +160,100 @@ async function startServer() {
     });
   });
 
+  // WiZ Lamp connection test (handshake UDP port 38899)
+  app.get("/api/wiz/test-connection", async (req, res) => {
+    const targetIp = (req.query.ip as string) || deviceConfig.wizIp;
+    const targetPort = parseInt((req.query.port as string) || deviceConfig.wizPort) || 38899;
+    console.log(`[WiZ Diagnostic] Testing UDP connection to ${targetIp}:${targetPort}`);
+    
+    try {
+      const { default: dgram } = await import("dgram");
+      const client = dgram.createSocket("udp4");
+      
+      const payload = JSON.stringify({
+        method: "getPilot",
+        params: {}
+      });
+      const buffer = Buffer.from(payload);
+      
+      let resolved = false;
+      
+      const checkPromise = new Promise<{ online: boolean; message: string }>((resolve) => {
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            client.close();
+            resolve({
+              online: false,
+              message: `Timeout! Tidak menerima respon UDP dari WiZ Lampu di ${targetIp}:${targetPort}. Pastikan lampu dinyalakan lewat saklar dinding dan terhubung ke jaringan WiFi yang sama.`
+            });
+          }
+        }, 1500);
+
+        client.on("message", (msg, rinfo) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            client.close();
+            try {
+              const resData = JSON.parse(msg.toString());
+              console.log(`[WiZ Diagnostic] Terima respon dari ${rinfo.address}:`, resData);
+              resolve({
+                online: true,
+                message: `Koneksi Berhasil! Terhubung ke WiZ Lampu di ${targetIp}:${targetPort}. Respon perangkat: ${JSON.stringify(resData.result || resData)}`
+              });
+            } catch (e) {
+              resolve({
+                online: true,
+                message: `Koneksi Berhasil! Terhubung ke WiZ Lampu di ${targetIp}:${targetPort}. Respon mentah diterima.`
+              });
+            }
+          }
+        });
+
+        client.on("error", (err) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            client.close();
+            resolve({
+              online: false,
+              message: `Error jaringan socket UDP: ${err.message}`
+            });
+          }
+        });
+
+        // Send handshake packet
+        client.send(buffer, 0, buffer.length, targetPort, targetIp, (err) => {
+          if (err && !resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            client.close();
+            resolve({
+              online: false,
+              message: `Gagal mengirim paket UDP: ${err.message}`
+            });
+          }
+        });
+      });
+
+      const result = await checkPromise;
+      res.json({
+        success: true,
+        online: result.online,
+        ip: targetIp,
+        port: targetPort,
+        diagnostics: result.message
+      });
+    } catch (error) {
+      res.json({
+        success: false,
+        message: "Gagal menjalankan UDP diagnostic scanner",
+        error: String(error)
+      });
+    }
+  });
+
   // 2. CCTV ICSee Controls (RTSP, Snapshot & PTZ)
   app.post("/api/icsee/ptz", (req, res) => {
     const { direction, ip } = req.body; // 'up', 'down', 'left', 'right', 'zoom_in', 'zoom_out'
@@ -142,16 +262,106 @@ async function startServer() {
     res.json({ success: true, message: `Kamera bergerak ke ${direction}` });
   });
 
+  // Real Connection Port Scanner for real-time camera inspection (ketika uji link kasih repon nyata!)
+  app.get("/api/icsee/test-connection", async (req, res) => {
+    const targetIp = (req.query.ip as string) || deviceConfig.icseeIp;
+    console.log(`[ICSee Diagnostic] Testing connection to ${targetIp}`);
+    
+    try {
+      const portsToTest = [
+        { port: 80, name: "Web Service (Snapshot)" },
+        { port: 554, name: "RTSP Video Stream" },
+        { port: 8899, name: "ONVIF protocol" },
+        { port: 34567, name: "iCSee NETIP SDK" }
+      ];
+      
+      const results = [];
+      for (const p of portsToTest) {
+        const isOpen = await checkTcpPort(p.port, targetIp, 1200);
+        results.push({ port: p.port, name: p.name, open: isOpen });
+      }
+      
+      const isAnyOpen = results.some(r => r.open);
+      let diagnostics = "";
+      if (isAnyOpen) {
+        diagnostics = `Koneksi Berhasil! Terhubung ke kamera di ${targetIp}. `;
+        const openPorts = results.filter(r => r.open).map(r => r.port);
+        if (openPorts.includes(34567)) {
+          diagnostics += "Kamera terdeteksi sebagai perangkat Xiongmai/iCSee (NETIP) asli. ";
+        }
+        if (openPorts.includes(554)) {
+          diagnostics += "Port RTSP (554) aktif, link RTSP siap dialirkan ke NVR/media player.";
+        }
+      } else {
+        diagnostics = `Ping Gagal! Tidak ada port responsif di ${targetIp}. Pastikan kabel power CCTV terpasang, WiFi CCTV terhubung ke router yang sama, dan IP Address sudah benar.`;
+      }
+      
+      res.json({
+        success: true,
+        ip: targetIp,
+        online: isAnyOpen,
+        results,
+        diagnostics
+      });
+    } catch (error) {
+      res.json({
+        success: false,
+        message: "Gagal menjalankan diagnostic scanner",
+        error: String(error)
+      });
+    }
+  });
+
   app.get("/api/icsee/snapshot", async (req, res) => {
-    const targetIp = req.query.ip || deviceConfig.icseeIp;
-    const targetRtsp = req.query.rtspUrl || deviceConfig.icseeRtspUrl;
+    const targetIp = (req.query.ip as string) || deviceConfig.icseeIp;
+    const username = (req.query.username as string) || "admin";
+    const password = (req.query.password as string) || "";
+    
     console.log(`[ICSee] Mengambil snapshot dari ${targetIp}`);
-    res.json({ 
-      success: true, 
-      url: "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=800&q=80", // High-quality smart home backyard mockup for demo
-      ip: targetIp,
-      rtsp: targetRtsp
-    });
+
+    const wantsJson = req.query.json === "true" || req.headers.accept?.includes("application/json");
+    if (wantsJson) {
+      res.json({
+        success: true,
+        url: `/api/icsee/snapshot?ip=${targetIp}&t=${Date.now()}`,
+        ip: targetIp
+      });
+      return;
+    }
+    
+    // Quick scan port 80 to prevent hanging the fetch request
+    const isPort80Open = await checkTcpPort(80, targetIp, 800);
+    if (isPort80Open) {
+      const urlsToTry = [
+        `http://${targetIp}/webcapture.jpg?command=snap&channel=1`,
+        `http://${targetIp}/cgi-bin/snapshot.cgi?user=${username}&pwd=${password}`,
+        `http://${targetIp}/snapshot.jpg`
+      ];
+      
+      for (const url of urlsToTry) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1000);
+          
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            res.setHeader("Content-Type", "image/jpeg");
+            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("X-CCTV-Source", "real-camera");
+            res.send(Buffer.from(arrayBuffer));
+            return;
+          }
+        } catch (err) {
+          // Silently skip and try next
+        }
+      }
+    }
+    
+    // Fallback: Redirect to high-quality smart home backyard mockup image
+    res.redirect("https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=800&q=80");
   });
 
   // 3. Android TV Controls (Real ADB TCP/IP Command Execution if installed)

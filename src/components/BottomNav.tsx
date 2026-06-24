@@ -17,8 +17,8 @@ export default function BottomNav({ activeTab, setActiveTab }: BottomNavProps) {
   ];
 
   return (
-    <nav className="fixed bottom-4 left-4 right-4 bg-[#121214]/90 backdrop-blur-xl border border-zinc-800/80 p-2 z-50 rounded-2xl shadow-2xl max-w-lg mx-auto">
-      <div className="flex justify-around items-center">
+    <nav className="fixed bottom-4 left-4 right-4 bg-[#121214]/95 backdrop-blur-xl border border-zinc-800/85 p-1.5 z-50 rounded-2xl shadow-2xl max-w-md mx-auto">
+      <div className="flex justify-between items-center px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -26,18 +26,20 @@ export default function BottomNav({ activeTab, setActiveTab }: BottomNavProps) {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center gap-1.5 py-2 px-3.5 rounded-xl transition-all duration-300 group ${
+              className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 sm:gap-1 py-1.5 px-1 rounded-xl transition-all duration-300 group cursor-pointer ${
                 isActive
-                  ? 'text-[#F97316] font-extrabold scale-105 bg-[#1C1C1F]'
+                  ? 'text-[#F97316] font-black scale-105 bg-[#1C1C1F]'
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <Icon size={20} className={isActive ? 'stroke-[2.5]' : 'stroke-[2]'} />
-              <span className="text-[10px] tracking-widest font-bold uppercase">{item.label}</span>
+              <Icon size={16} className={`sm:w-[18px] sm:h-[18px] ${isActive ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+              <span className="text-[8px] sm:text-[9px] font-black tracking-wide uppercase text-center block">
+                {item.label}
+              </span>
               
               {/* Premium indicator dot shown in screenshots */}
               {isActive && (
-                <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-[#F97316] shadow-md shadow-orange-500/80 animate-pulse"></span>
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#F97316] shadow-md shadow-orange-500/80 animate-pulse"></span>
               )}
             </button>
           );

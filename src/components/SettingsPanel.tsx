@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe } from 'lucide-react';
+import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe, RefreshCw } from 'lucide-react';
 import type { SmartConfig } from '../types';
 
 interface SettingsPanelProps {
@@ -12,7 +12,7 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
   const [form, setForm] = useState<SmartConfig>({
     ...config,
     wizLamps: config.wizLamps || [
-      { id: 'lampu-1', name: config.wizName || 'Lampu Utama Living Room', ip: config.wizIp || '192.168.1.10', port: config.wizPort || '38899' }
+      { id: 'lampu-1', name: config.wizName || 'Lampu Utama Living Room', ip: config.wizIp || '192.168.1.10', port: config.wizPort || '38899', group: 'Ruang Tamu' }
     ],
     cctvs: config.cctvs || [
       { id: 'cctv-1', name: config.icseeName || 'CCTV Pintu Depan', ip: config.icseeIp || '192.168.1.20', rtspUrl: config.icseeRtspUrl || 'rtsp://admin:123456@192.168.1.20:554/stream1?channel=1&subtype=0' }
@@ -21,23 +21,59 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
   const [testingDevice, setTestingDevice] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; msg: string } | null>(null);
 
+  // Quick Add WiZ Lamp states
+  const [quickWizIp, setQuickWizIp] = useState('');
+  const [quickWizName, setQuickWizName] = useState('');
+  const [quickWizGroup, setQuickWizGroup] = useState('Ruang Tamu');
+  const [isWizIpTested, setIsWizIpTested] = useState(false);
+  const [quickAdding, setQuickAdding] = useState(false);
+  const [quickAddResult, setQuickAddResult] = useState<{ success: boolean; msg: string } | null>(null);
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     onSave(form);
   };
 
-  const testConnection = (deviceKey: string, ip: string, deviceName: string) => {
+  const testConnection = async (deviceKey: string, ip: string, deviceName: string) => {
     setTestingDevice(deviceName);
     setTestResult(null);
 
-    setTimeout(() => {
-      setTestingDevice(null);
-      setTestResult({
-        id: deviceKey,
-        success: true,
-        msg: `Ping ke ${deviceName} (${ip}) Berhasil! (Latency: ${Math.floor(12 + Math.random() * 20)}ms)`
-      });
-    }, 1500);
+    if (deviceKey.startsWith('icseeIp')) {
+      try {
+        const response = await fetch(`/api/icsee/test-connection?ip=${ip}`);
+        const data = await response.json();
+        setTestingDevice(null);
+        if (data.success) {
+          setTestResult({
+            id: deviceKey,
+            success: data.online,
+            msg: data.diagnostics
+          });
+        } else {
+          setTestResult({
+            id: deviceKey,
+            success: false,
+            msg: `Gagal memindai port pada ${deviceName} (${ip}).`
+          });
+        }
+      } catch (err) {
+        setTestingDevice(null);
+        setTestResult({
+          id: deviceKey,
+          success: false,
+          msg: `Error menghubungkan ke backend diagnostic: ${String(err)}`
+        });
+      }
+    } else {
+      setTimeout(() => {
+        setTestingDevice(null);
+        setTestResult({
+          id: deviceKey,
+          success: true,
+          msg: `Ping ke ${deviceName} (${ip}) Berhasil! (Latency: ${Math.floor(12 + Math.random() * 20)}ms)`
+        });
+      }, 1200);
+    }
   };
 
   const addWizLamp = () => {
@@ -59,6 +95,97 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
     });
   };
 
+  const handleTestWizIp = async () => {
+    if (!quickWizIp) {
+      setQuickAddResult({
+        success: false,
+        msg: "Harap masukkan IP Address lampu terlebih dahulu."
+      });
+      return;
+    }
+
+    setQuickAdding(true);
+    setQuickAddResult(null);
+
+    try {
+      // 1. Fetch UDP handshake diagnostic endpoint
+      const response = await fetch(`/api/wiz/test-connection?ip=${quickWizIp}`);
+      const data = await response.json();
+
+      if (data.success && data.online) {
+        // 2. Turn on the lamp (menyala) so the user can visually confirm which lamp it is!
+        await fetch('/api/wiz/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isOn: true, brightness: 100, ip: quickWizIp })
+        });
+
+        setIsWizIpTested(true);
+        setQuickAddResult({
+          success: true,
+          msg: `Koneksi Berhasil! Lampu pada IP ${quickWizIp} telah dikirimi perintah untuk MENYALA. Silakan cek apakah lampu Anda sudah bersinar, lalu beri nama di bawah.`
+        });
+      } else {
+        setIsWizIpTested(false);
+        setQuickAddResult({
+          success: false,
+          msg: data.diagnostics || `Koneksi Gagal! IP Lampu ${quickWizIp} tidak merespon paket UDP. Pastikan lampu menyala dan terhubung ke WiFi.`
+        });
+      }
+    } catch (err) {
+      setIsWizIpTested(false);
+      setQuickAddResult({
+        success: false,
+        msg: `Error saat menghubungkan ke diagnostic server: ${String(err)}`
+      });
+    } finally {
+      setQuickAdding(false);
+    }
+  };
+
+  const handleSaveQuickWiz = () => {
+    if (!quickWizName) {
+      setQuickAddResult({
+        success: false,
+        msg: "Harap masukkan nama lampu untuk disimpan."
+      });
+      return;
+    }
+
+    // Save the device!
+    const newLamps = [
+      ...(form.wizLamps || []),
+      {
+        id: `lampu-${Date.now()}`,
+        name: quickWizName,
+        ip: quickWizIp,
+        port: '38899',
+        group: quickWizGroup || 'Ruang Tamu'
+      }
+    ];
+
+    const updatedForm = {
+      ...form,
+      wizLamps: newLamps,
+      wizName: newLamps[0].name,
+      wizIp: newLamps[0].ip,
+      wizPort: newLamps[0].port
+    };
+
+    setForm(updatedForm);
+    onSave(updatedForm); // Auto-save right away!
+
+    setQuickAddResult({
+      success: true,
+      msg: `Sukses! Lampu "${quickWizName}" (${quickWizIp}) pada kelompok "${quickWizGroup || 'Ruang Tamu'}" berhasil disimpan.`
+    });
+
+    // Reset states for the next device
+    setQuickWizIp('');
+    setQuickWizName('');
+    setIsWizIpTested(false);
+  };
+
   const removeWizLamp = (id: string) => {
     const filtered = (form.wizLamps || []).filter(l => l.id !== id);
     if (filtered.length === 0) return;
@@ -71,7 +198,7 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
     });
   };
 
-  const updateWizLamp = (id: string, field: 'name' | 'ip' | 'port', value: string) => {
+  const updateWizLamp = (id: string, field: 'name' | 'ip' | 'port' | 'group', value: string) => {
     const updated = (form.wizLamps || []).map(l => {
       if (l.id === id) {
         return { ...l, [field]: value };
@@ -205,6 +332,138 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
           {/* 1. Philips WiZ Setup */}
           {activeSubTab === 'wiz' && (
             <div className="space-y-4 animate-fade-in">
+              {/* Formulir Tambah Lampu Cepat (2-Step Setup) */}
+              <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-900 space-y-4">
+                <div className="flex items-center gap-1.5 border-b border-zinc-900 pb-2.5">
+                  <Lightbulb size={13} className="text-[#F97316]" />
+                  <span className="text-[10px] font-black text-white tracking-wider uppercase">Prosedur Tambah Lampu (Uji Dulu &gt; Beri Nama)</span>
+                </div>
+
+                {/* LANGKAH 1: INPUT IP & UJI KONEKSI */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 flex items-center justify-center bg-orange-500/10 border border-orange-500/20 text-[#F97316] text-[9px] font-black rounded-full">1</span>
+                    <span className="text-[10px] font-black text-zinc-300 uppercase tracking-wider">Langkah 1: Masukkan IP & Uji Lampu</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                    <div className="sm:col-span-2">
+                      <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">IP Address Lampu</label>
+                      <input
+                        type="text"
+                        value={quickWizIp}
+                        disabled={isWizIpTested || quickAdding}
+                        onChange={(e) => setQuickWizIp(e.target.value)}
+                        placeholder="Contoh: 192.168.1.15"
+                        className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all disabled:opacity-50"
+                      />
+                    </div>
+                    <div>
+                      {!isWizIpTested ? (
+                        <button
+                          type="button"
+                          onClick={handleTestWizIp}
+                          disabled={quickAdding || !quickWizIp}
+                          className={`w-full py-1.5 px-3 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer h-[34px] ${
+                            quickAdding || !quickWizIp
+                              ? 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                              : 'bg-orange-500/10 hover:bg-orange-500/20 text-[#F97316] border border-orange-500/30 shadow-sm'
+                          }`}
+                        >
+                          {quickAdding ? (
+                            <>
+                              <RefreshCw size={11} className="animate-spin" />
+                              Menguji...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw size={11} />
+                              Uji & Nyalakan
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsWizIpTested(false);
+                            setQuickAddResult(null);
+                          }}
+                          className="w-full py-1.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 font-black text-[10px] uppercase tracking-wider rounded-xl border border-zinc-800 transition-all cursor-pointer h-[34px]"
+                        >
+                          Ubah IP / Ulangi
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* LANGKAH 2: BERI NAMA & SIMPAN (Only active after successful test) */}
+                {isWizIpTested && (
+                  <div className="space-y-3 pt-3 border-t border-zinc-900/60 animate-fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black rounded-full">2</span>
+                      <span className="text-[10px] font-black text-zinc-300 uppercase tracking-wider">Langkah 2: Tentukan Nama & Kelompok Lampu</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Nama Lampu WiZ</label>
+                        <input
+                          type="text"
+                          value={quickWizName}
+                          onChange={(e) => setQuickWizName(e.target.value)}
+                          placeholder="Contoh: Lampu Teras Depan atau Lampu Utama"
+                          className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500/50 text-white placeholder-zinc-600 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Kelompok / Grup Lampu</label>
+                        <select
+                          value={quickWizGroup}
+                          onChange={(e) => setQuickWizGroup(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500/50 text-white transition-all"
+                        >
+                          <option value="Ruang Tamu">Ruang Tamu</option>
+                          <option value="Kamar Tidur">Kamar Tidur</option>
+                          <option value="Teras Depan">Teras Depan</option>
+                          <option value="Dapur">Dapur</option>
+                          <option value="Taman">Taman</option>
+                          <option value="Lainnya">Lainnya / Tanpa Kelompok</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={handleSaveQuickWiz}
+                        disabled={!quickWizName}
+                        className={`px-5 py-2 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer h-[34px] ${
+                          !quickWizName
+                            ? 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm'
+                        }`}
+                      >
+                        <CheckCircle size={11} />
+                        Simpan Lampu ke Kelompok
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* HASIL DIAGNOSTIK / FEEDBACK */}
+                {quickAddResult && (
+                  <div className={`p-3 rounded-xl text-[10px] border leading-relaxed font-medium ${
+                    quickAddResult.success
+                      ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
+                      : 'bg-red-500/5 border-red-500/20 text-red-400'
+                  }`}>
+                    {quickAddResult.msg}
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black text-orange-400 tracking-widest block uppercase">Daftar Lampu Philips WiZ</span>
                 <button
@@ -242,15 +501,32 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
                     </div>
                     
                     <div className="space-y-2">
-                      <div>
-                        <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Nama Lampu</label>
-                        <input
-                          type="text"
-                          value={lamp.name}
-                          onChange={(e) => updateWizLamp(lamp.id, 'name', e.target.value)}
-                          placeholder="Contoh: Lampu Ruang Tamu"
-                          className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Nama Lampu</label>
+                          <input
+                            type="text"
+                            value={lamp.name}
+                            onChange={(e) => updateWizLamp(lamp.id, 'name', e.target.value)}
+                            placeholder="Contoh: Lampu Ruang Tamu"
+                            className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Kelompok / Grup</label>
+                          <select
+                            value={lamp.group || 'Ruang Tamu'}
+                            onChange={(e) => updateWizLamp(lamp.id, 'group', e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white transition-all"
+                          >
+                            <option value="Ruang Tamu">Ruang Tamu</option>
+                            <option value="Kamar Tidur">Kamar Tidur</option>
+                            <option value="Teras Depan">Teras Depan</option>
+                            <option value="Dapur">Dapur</option>
+                            <option value="Taman">Taman</option>
+                            <option value="Lainnya">Lainnya / Tanpa Kelompok</option>
+                          </select>
+                        </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <div className="col-span-2">

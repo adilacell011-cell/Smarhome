@@ -10,7 +10,7 @@ interface CctvControlProps {
 
 export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlProps) {
   const [selectedCctv, setSelectedCctv] = useState<CctvConfig | null>(null);
-  const [snapshotUrl, setSnapshotUrl] = useState<string>('');
+  const [refreshKey, setRefreshKey] = useState<number>(Date.now());
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [ptzMessage, setPtzMessage] = useState<string | null>(null);
@@ -18,6 +18,15 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   const [showEvents, setShowEvents] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  
+  // Real Connection Diagnostics (Uji Link) states
+  const [testingConn, setTestingConn] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    online: boolean;
+    ip: string;
+    diagnostics: string;
+    results: Array<{ port: number; name: string; open: boolean }>;
+  } | null>(null);
 
   useEffect(() => {
     if (cctvs && cctvs.length > 0) {
@@ -37,18 +46,32 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   const activeIp = selectedCctv ? selectedCctv.ip : icseeIp;
   const rtspUrl = selectedCctv ? selectedCctv.rtspUrl : `rtsp://${icseeIp}:554/stream1?channel=1&subtype=0`;
 
-  const fetchSnapshot = async () => {
+  const handleRefresh = () => {
     setLoading(true);
+    setRefreshKey(Date.now());
+    setTimeout(() => setLoading(false), 800);
+  };
+
+  const handleTestConnection = async () => {
+    setTestingConn(true);
+    setTestResult(null);
     try {
-      const response = await fetch(`/api/icsee/snapshot?ip=${activeIp}&rtspUrl=${encodeURIComponent(rtspUrl)}`);
-      const data = await response.json();
+      const res = await fetch(`/api/icsee/test-connection?ip=${activeIp}`);
+      const data = await res.json();
       if (data.success) {
-        setSnapshotUrl(data.url);
+        setTestResult({
+          online: data.online,
+          ip: data.ip,
+          diagnostics: data.diagnostics,
+          results: data.results || []
+        });
+        // Force refresh image snapshot
+        setRefreshKey(Date.now());
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      setTestingConn(false);
     }
   };
 
@@ -62,9 +85,9 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
     setPtzMessage(`Panning PTZ camera: ${direction.toUpperCase()}...`);
     try {
       await fetch('/api/icsee/ptz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direction, ip: activeIp }),
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ direction, ip: activeIp }),
       });
     } catch (err) {
       console.error(err);
@@ -83,7 +106,7 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
 
   useEffect(() => {
     if (activeIp) {
-      fetchSnapshot();
+      setRefreshKey(Date.now());
     }
   }, [selectedCctv, icseeIp]);
 
@@ -134,20 +157,14 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
 
         {/* Stream Viewer Display Container */}
         <div className="relative w-full h-64 bg-black rounded-2xl overflow-hidden border border-zinc-900/60 flex items-center justify-center">
-          
-          {snapshotUrl ? (
-            <img
-              src={snapshotUrl}
-              alt="ICSee Live Feed"
-              className="w-full h-full object-cover opacity-85"
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <AlertTriangle className="text-zinc-700 animate-bounce" size={28} />
-              <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">NO LIVE FEED</p>
-              <p className="text-[10px] text-zinc-600">Camera stream requires RTSP decoder pipeline</p>
-            </div>
-          )}
+          <img
+            src={`/api/icsee/snapshot?ip=${activeIp}&t=${refreshKey}`}
+            alt="ICSee Live Feed"
+            className="w-full h-full object-cover opacity-90"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=800&q=80";
+            }}
+          />
 
           {/* Info Overlays */}
           <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-md text-[9px] font-mono tracking-wider font-extrabold text-white flex items-center gap-1.5">
@@ -155,8 +172,12 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
             REC • 1080P
           </div>
 
-          <div className="absolute top-3 right-3 bg-zinc-900/90 border border-zinc-800/80 px-2.5 py-1 rounded-md text-[9px] font-bold text-zinc-400">
-            OFFLINE
+          <div className={`absolute top-3 right-3 border px-2.5 py-1 rounded-md text-[9px] font-bold ${
+            testResult?.online 
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+              : 'bg-zinc-900/90 border-zinc-800/80 text-zinc-400'
+          }`}>
+            {testResult?.online ? 'REAL CAMERA (ONLINE)' : 'SIMULATION FALLBACK'}
           </div>
 
           <div className="absolute bottom-3 left-3 bg-black/60 px-2.5 py-1 rounded text-[10px] text-zinc-300 font-mono tracking-wide">
@@ -168,24 +189,46 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-zinc-800/50 pb-4">
           <div>
             <h3 className="text-sm font-extrabold text-white">{selectedCctv?.name || icseeName || 'Kamera Depan'}</h3>
-            <p className="text-[10px] text-zinc-500 font-medium">{selectedCctv?.name || 'Pintu Depan'} • {activeIp}</p>
+            <p className="text-[10px] text-zinc-500 font-mono">{activeIp} • Port: 554/34567</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Uji Koneksi button (ketika uji link kasih respon nyata!) */}
+            <button 
+              onClick={handleTestConnection}
+              disabled={testingConn}
+              className={`px-3 py-1.5 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
+                testingConn 
+                  ? 'bg-zinc-800 text-zinc-500' 
+                  : 'bg-orange-500/10 hover:bg-orange-500/20 text-[#F97316] border border-orange-500/20'
+              }`}
+            >
+              <RefreshCw size={12} className={testingConn ? "animate-spin" : ""} />
+              {testingConn ? "Scanning..." : "Uji Koneksi"}
+            </button>
+
+            {/* Refresh Snapshot button */}
+            <button 
+              onClick={handleRefresh}
+              className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+            >
+              Refresh Feed
+            </button>
+
             {/* AI Scan button */}
             <button 
               onClick={handleAiScan}
               disabled={aiAnalyzing}
-              className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1"
+              className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1 cursor-pointer"
             >
               <Cpu size={12} className={aiAnalyzing ? "animate-spin" : ""} />
-              {aiAnalyzing ? "Scanning..." : "AI Scan"}
+              {aiAnalyzing ? "Analyzing..." : "AI Scan"}
             </button>
 
             {/* Record button */}
             <button 
               onClick={() => setIsRecording(!isRecording)}
-              className={`px-3 py-1.5 border font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 border font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                 isRecording 
                   ? 'bg-rose-500/15 border-rose-500/40 text-rose-400' 
                   : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
@@ -273,6 +316,45 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
             </button>
           </div>
         </div>
+
+        {testingConn && (
+          <div className="p-3.5 bg-zinc-950 border border-zinc-900 rounded-2xl text-left text-[10px] font-mono text-[#F97316] space-y-1">
+            <p className="animate-pulse flex items-center gap-2">
+              <RefreshCw size={10} className="animate-spin" />
+              Scanning ports for Xiongmai CCTV at {activeIp}...
+            </p>
+            <p className="text-zinc-600">[SCAN] TCP Connect: 80 (Web), 554 (RTSP), 8899 (ONVIF), 34567 (iCSee NETIP)...</p>
+          </div>
+        )}
+
+        {testResult && (
+          <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-3.5 space-y-3 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black text-orange-400 tracking-widest uppercase">Diagnostic Ports Result</span>
+              <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${
+                testResult.online ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+              }`}>
+                {testResult.online ? 'CONNECTED' : 'DISCONNECTED'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-zinc-400">
+              {testResult.results.map((port) => (
+                <div key={port.port} className="flex items-center justify-between bg-[#121214] p-2 rounded-lg border border-zinc-900/60">
+                  <span className="truncate">{port.name} ({port.port})</span>
+                  <span className={`font-black uppercase tracking-wider ${port.open ? 'text-emerald-400' : 'text-zinc-600'}`}>
+                    {port.open ? 'OPEN' : 'CLOSE'}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-[10px] leading-relaxed text-zinc-400 bg-zinc-900/40 p-2.5 rounded-lg border border-zinc-800/40">
+              <span className="font-extrabold text-white block mb-0.5">Analisis Sistem:</span>
+              {testResult.diagnostics}
+            </div>
+          </div>
+        )}
 
         {/* Dropdown recordings & AI events - MATCHING SCREENSHOT 2 */}
         <div className="border-t border-zinc-800/60 pt-3">

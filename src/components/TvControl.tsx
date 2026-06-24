@@ -136,24 +136,24 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
           <div className="grid grid-cols-3 gap-2.5">
             <button
               onClick={() => sendCommand('KEY_BACK')}
-              className="flex flex-col items-center justify-center p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
+              className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <CornerDownLeft size={16} />
-              <span className="text-[10px] tracking-wider uppercase mt-1">Back</span>
+              <span className="text-[9px] sm:text-[10px] tracking-wider uppercase mt-1">Back</span>
             </button>
             <button
               onClick={() => sendCommand('KEY_HOME')}
-              className="flex flex-col items-center justify-center p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
+              className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <Home size={16} />
-              <span className="text-[10px] tracking-wider uppercase mt-1">Home</span>
+              <span className="text-[9px] sm:text-[10px] tracking-wider uppercase mt-1">Home</span>
             </button>
             <button
               onClick={() => sendCommand('KEY_MENU')}
-              className="flex flex-col items-center justify-center p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
+              className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <Menu size={16} />
-              <span className="text-[10px] tracking-wider uppercase mt-1">Menu</span>
+              <span className="text-[9px] sm:text-[10px] tracking-wider uppercase mt-1">Menu</span>
             </button>
 
             <button
@@ -162,12 +162,12 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
                 setState({ ...state, volume: nextVol });
                 sendCommand('VOLUME_DOWN', nextVol);
               }}
-              className="flex items-center justify-center gap-1.5 p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
+              className="flex items-center justify-center gap-1.5 p-2 sm:p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
             >
               <Volume1 size={14} className="text-[#F97316]" />
-              <span className="text-xs font-bold font-mono">Vol -</span>
+              <span className="text-[10px] sm:text-xs font-bold font-mono">Vol -</span>
             </button>
-            <div className="flex items-center justify-center p-3 bg-purple-500/10 rounded-2xl text-purple-400 font-mono text-sm font-black border border-purple-500/20">
+            <div className="flex items-center justify-center p-2 sm:p-3 bg-purple-500/10 rounded-2xl text-purple-400 font-mono text-sm font-black border border-purple-500/20">
               {state.volume}
             </div>
             <button
@@ -176,10 +176,10 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
                 setState({ ...state, volume: nextVol });
                 sendCommand('VOLUME_UP', nextVol);
               }}
-              className="flex items-center justify-center gap-1.5 p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
+              className="flex items-center justify-center gap-1.5 p-2 sm:p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
             >
               <Volume2 size={14} className="text-[#F97316]" />
-              <span className="text-xs font-bold font-mono">Vol +</span>
+              <span className="text-[10px] sm:text-xs font-bold font-mono">Vol +</span>
             </button>
           </div>
 
@@ -194,7 +194,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
                     setState({ ...state, currentApp: app.name });
                     sendCommand('LAUNCH_APP', app.package);
                   }}
-                  className={`p-3 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-2 ${
+                  className={`p-2 sm:p-3 rounded-xl text-[10px] sm:text-xs font-bold transition-all border flex items-center justify-center gap-2 ${
                     state.currentApp === app.name
                       ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
                       : 'bg-zinc-900 text-zinc-300 border-zinc-800/80 hover:bg-zinc-800'
