@@ -1,5 +1,5 @@
 {
-  "name": "Smart Home Hub",
+  "name": "Adilanet Dashboard Control",
   "description": "Centralized dashboard for managing smart home devices including WiFi CCTV, Philips WiZ lights, and Android TV.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
