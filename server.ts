@@ -2,6 +2,8 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import net from "net";
+import dgram from "dgram";
+import { exec } from "child_process";
 import { createServer as createViteServer } from "vite";
 
 // Helper function to check if a TCP port is open (Ping substitute for port-level verification)
@@ -139,7 +141,7 @@ async function startServer() {
     console.log(`[WiZ UDP] Mengirim paket ke ${targetIp}:${targetPort} -> ${payload}`);
     
     // Send via real UDP Socket
-    import("dgram").then(({ default: dgram }) => {
+    try {
       const client = dgram.createSocket("udp4");
       const buffer = Buffer.from(payload);
       
@@ -149,15 +151,137 @@ async function startServer() {
           console.error(`[WiZ UDP Error] Gagal mengirim paket ke ${targetIp}:`, err);
         }
       });
-    }).catch(err => {
+    } catch (err) {
       console.error("[WiZ UDP Socket Error]", err);
-    });
+    }
     
     res.json({ 
       success: true, 
       message: `Perintah WiZ berhasil dikirim ke ${targetIp}:${targetPort}`,
       state: { isOn, brightness, colorTemp, scene, color }
     });
+  });
+
+  // Fetch real-time power and brightness status of all registered WiZ lamps via parallel UDP queries
+  app.get("/api/wiz/status", async (req, res) => {
+    const lamps = deviceConfig.wizLamps || [];
+    if (lamps.length === 0) {
+      return res.json({ success: true, statuses: {} });
+    }
+
+    try {
+      const statusPromises = lamps.map(lamp => {
+        return new Promise<{ id: string; ip: string; isOn: boolean; brightness: number; colorTemp: number; online: boolean }>((resolve) => {
+          const client = dgram.createSocket("udp4");
+          const payload = JSON.stringify({ method: "getPilot", params: {} });
+          const buffer = Buffer.from(payload);
+          const port = parseInt(lamp.port) || 38899;
+          let resolved = false;
+
+          const timeoutId = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              client.close();
+              resolve({
+                id: lamp.id,
+                ip: lamp.ip,
+                isOn: false,
+                brightness: 80,
+                colorTemp: 4000,
+                online: false
+              });
+            }
+          }, 800); // Fast 800ms timeout for non-blocking page load
+
+          client.on("message", (msg) => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeoutId);
+              client.close();
+              try {
+                const resData = JSON.parse(msg.toString());
+                if (resData && resData.result) {
+                  resolve({
+                    id: lamp.id,
+                    ip: lamp.ip,
+                    isOn: resData.result.state === true || resData.result.state === 1,
+                    brightness: resData.result.dimming || 80,
+                    colorTemp: resData.result.temp || 4000,
+                    online: true
+                  });
+                } else {
+                  resolve({
+                    id: lamp.id,
+                    ip: lamp.ip,
+                    isOn: false,
+                    brightness: 80,
+                    colorTemp: 4000,
+                    online: true
+                  });
+                }
+              } catch (e) {
+                resolve({
+                  id: lamp.id,
+                  ip: lamp.ip,
+                  isOn: false,
+                  brightness: 80,
+                  colorTemp: 4000,
+                  online: true
+                });
+              }
+            }
+          });
+
+          client.on("error", () => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeoutId);
+              client.close();
+              resolve({
+                id: lamp.id,
+                ip: lamp.ip,
+                isOn: false,
+                brightness: 80,
+                colorTemp: 4000,
+                online: false
+              });
+            }
+          });
+
+          client.send(buffer, 0, buffer.length, port, lamp.ip, (err) => {
+            if (err && !resolved) {
+              resolved = true;
+              clearTimeout(timeoutId);
+              client.close();
+              resolve({
+                id: lamp.id,
+                ip: lamp.ip,
+                isOn: false,
+                brightness: 80,
+                colorTemp: 4000,
+                online: false
+              });
+            }
+          });
+        });
+      });
+
+      const results = await Promise.all(statusPromises);
+      const statusesMap: { [id: string]: { isOn: boolean; brightness: number; colorTemp: number; online: boolean } } = {};
+      results.forEach(r => {
+        statusesMap[r.id] = {
+          isOn: r.isOn,
+          brightness: r.brightness,
+          colorTemp: r.colorTemp,
+          online: r.online
+        };
+      });
+
+      res.json({ success: true, statuses: statusesMap });
+    } catch (error) {
+      console.error("[WiZ Status Error]", error);
+      res.json({ success: false, message: "Gagal mendeteksi status lampu", error: String(error) });
+    }
   });
 
   // WiZ Lamp connection test (handshake UDP port 38899)
@@ -167,7 +291,6 @@ async function startServer() {
     console.log(`[WiZ Diagnostic] Testing UDP connection to ${targetIp}:${targetPort}`);
     
     try {
-      const { default: dgram } = await import("dgram");
       const client = dgram.createSocket("udp4");
       
       const payload = JSON.stringify({
@@ -390,7 +513,7 @@ async function startServer() {
     console.log(`[Android TV ADB] Memproses perintah: ${command} (${adbKey}) untuk TV ${targetIp}`);
 
     // Execute ADB CLI if available on the system
-    import("child_process").then(({ exec }) => {
+    try {
       exec("which adb", (err) => {
         if (err) {
           console.log("[Android TV ADB] Perintah adb CLI tidak tersedia di sistem host (Simulasi Aktif)");
@@ -414,9 +537,9 @@ async function startServer() {
           });
         }
       });
-    }).catch(execErr => {
-      console.error("[ADB Child Process Import Error]", execErr);
-    });
+    } catch (execErr) {
+      console.error("[ADB Child Process Execution Error]", execErr);
+    }
 
     res.json({ success: true, message: `Perintah TV ${command} berhasil dikirim ke ${targetIp}` });
   });

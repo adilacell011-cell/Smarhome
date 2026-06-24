@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Lightbulb, Power, Sliders, Palette, RefreshCw, FolderOpen, User, Layers, CheckCircle } from 'lucide-react';
+import { Lightbulb, Power, Sliders, Palette, RefreshCw, FolderOpen, User, Layers, CheckCircle, Pencil } from 'lucide-react';
 import type { WizState, WizLampConfig } from '../types';
 
 interface WizControlProps {
@@ -7,9 +7,10 @@ interface WizControlProps {
   wizIp: string;
   wizPort?: string;
   wizLamps?: WizLampConfig[];
+  onEditLamp?: (lamp: WizLampConfig) => void;
 }
 
-export default function WizControl({ wizName, wizIp, wizPort, wizLamps }: WizControlProps) {
+export default function WizControl({ wizName, wizIp, wizPort, wizLamps, onEditLamp }: WizControlProps) {
   const [activeTab, setActiveTab] = useState<'group' | 'individual'>('group');
   const [selectedLamp, setSelectedLamp] = useState<WizLampConfig | null>(null);
   
@@ -65,20 +66,81 @@ export default function WizControl({ wizName, wizIp, wizPort, wizLamps }: WizCon
     }
   }, [wizLamps, wizName, wizIp, wizPort]);
 
-  // Initialize individual lamp states (default to ON if untracked)
-  useEffect(() => {
-    const updatedStates = { ...individualLampOnStates };
-    let changed = false;
-    lamps.forEach(l => {
-      if (updatedStates[l.id] === undefined) {
-        updatedStates[l.id] = true;
-        changed = true;
+  // Fetch real physical status of all lamps from the server
+  const fetchRealStatus = async () => {
+    try {
+      const response = await fetch('/api/wiz/status');
+      const data = await response.json();
+      if (data.success && data.statuses) {
+        // Sync individual states
+        const updatedOnStates: { [id: string]: boolean } = {};
+        lamps.forEach(l => {
+          if (data.statuses[l.id] !== undefined) {
+            updatedOnStates[l.id] = data.statuses[l.id].isOn;
+          } else {
+            updatedOnStates[l.id] = false;
+          }
+        });
+        setIndividualLampOnStates(updatedOnStates);
+
+        // If a lamp is selected, sync the state
+        if (selectedLamp && data.statuses[selectedLamp.id]) {
+          const s = data.statuses[selectedLamp.id];
+          setState(prev => ({
+            ...prev,
+            isOn: s.isOn,
+            brightness: s.brightness,
+            colorTemp: s.colorTemp,
+          }));
+        }
+
+        // Sync group states: if any lamp in a group is on, the group is considered on
+        const newGroupStates: { [group: string]: WizState } = {};
+        groupNames.forEach(groupName => {
+          const groupLamps = groupsMap[groupName] || [];
+          const anyOn = groupLamps.some(l => data.statuses[l.id]?.isOn);
+          const firstLampStatus = groupLamps.length > 0 ? data.statuses[groupLamps[0].id] : null;
+          newGroupStates[groupName] = {
+            isOn: anyOn,
+            brightness: firstLampStatus?.brightness || 80,
+            colorTemp: firstLampStatus?.colorTemp || 4000,
+            color: '#FF7A00',
+            scene: 'Custom',
+          };
+        });
+        setGroupStates(newGroupStates);
       }
-    });
-    if (changed) {
-      setIndividualLampOnStates(updatedStates);
+    } catch (err) {
+      console.error("Gagal mendeteksi status riil lampu dari server:", err);
+    }
+  };
+
+  // Run on mount or when lamps list changes
+  useEffect(() => {
+    if (lamps.length > 0) {
+      fetchRealStatus();
     }
   }, [wizLamps]);
+
+  // Fetch status of selected lamp when it changes
+  useEffect(() => {
+    if (selectedLamp) {
+      fetch('/api/wiz/status')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.statuses && data.statuses[selectedLamp.id]) {
+            const s = data.statuses[selectedLamp.id];
+            setState(prev => ({
+              ...prev,
+              isOn: s.isOn,
+              brightness: s.brightness,
+              colorTemp: s.colorTemp,
+            }));
+          }
+        })
+        .catch(console.error);
+    }
+  }, [selectedLamp]);
 
   // Get current active state depending on tab
   const getGroupState = (group: string): WizState => {
@@ -355,7 +417,18 @@ export default function WizControl({ wizName, wizIp, wizPort, wizLamps }: WizCon
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${isLampOn ? 'bg-[#F97316] shadow-[0_0_8px_rgba(249,115,22,0.8)]' : 'bg-zinc-700'}`} />
                       <div className="truncate pr-2">
-                        <p className="text-xs font-extrabold text-white truncate">{lamp.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-extrabold text-white truncate">{lamp.name}</p>
+                          {onEditLamp && (
+                            <button
+                              onClick={() => onEditLamp(lamp)}
+                              className="p-0.5 hover:bg-zinc-800 text-zinc-500 hover:text-[#F97316] rounded transition-colors cursor-pointer"
+                              title="Ubah nama lampu"
+                            >
+                              <Pencil size={9} className="stroke-[2.5]" />
+                            </button>
+                          )}
+                        </div>
                         <p className="text-[9px] font-mono text-zinc-500 truncate">{lamp.ip}</p>
                       </div>
                     </div>
@@ -502,7 +575,18 @@ export default function WizControl({ wizName, wizIp, wizPort, wizLamps }: WizCon
                 <Lightbulb className={`w-6 h-6 ${state.isOn ? 'animate-pulse' : ''}`} />
               </div>
               <div>
-                <h2 className="font-extrabold text-white text-base tracking-wide">{selectedLamp?.name || wizName || 'Philips WiZ Lamp'}</h2>
+                <div className="flex items-center gap-1.5">
+                  <h2 className="font-extrabold text-white text-base tracking-wide">{selectedLamp?.name || wizName || 'Philips WiZ Lamp'}</h2>
+                  {onEditLamp && selectedLamp && selectedLamp.id !== 'default' && (
+                    <button
+                      onClick={() => onEditLamp(selectedLamp)}
+                      className="p-1 hover:bg-zinc-800 text-zinc-500 hover:text-[#F97316] rounded-lg transition-colors cursor-pointer"
+                      title="Edit Nama Lampu"
+                    >
+                      <Pencil size={11} className="stroke-[2.5]" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-xs text-zinc-500 font-mono">IP: {selectedLamp?.ip || wizIp}</span>
                   {selectedLamp?.group && (

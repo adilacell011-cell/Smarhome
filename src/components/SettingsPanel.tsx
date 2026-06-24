@@ -775,6 +775,50 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
           <span className="font-extrabold text-white">Prerequisite:</span> Same local router subnet required.
         </div>
       </div>
+
+      {/* PWA Installation Guide Card */}
+      <div className="bg-[#121214] rounded-3xl p-5 text-zinc-300 border border-[#1F1F24] space-y-3">
+        <div className="flex items-center gap-3">
+          <Globe size={16} className="text-[#F97316]" />
+          <h3 className="font-extrabold text-white text-xs sm:text-sm tracking-wide">Panduan PWA & Instalasi Aplikasi</h3>
+        </div>
+        
+        <p className="text-[10px] sm:text-xs text-zinc-400 leading-relaxed">
+          Instal dashboard Adilanet ke HP/Tablet untuk performa maksimal secepat aplikasi bawaan (Native) tanpa bilah navigasi browser.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {/* Android Chrome */}
+          <div className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col justify-between">
+            <div>
+              <p className="text-[9px] font-black text-orange-400 uppercase tracking-wider mb-1">Android & Chrome</p>
+              <p className="text-[9px] text-zinc-400 leading-normal">
+                Gunakan spanduk di Beranda, atau klik titik tiga <strong className="text-white">⋮</strong> di kanan atas Chrome lalu pilih <strong className="text-white">"Tambahkan ke Layar Utama"</strong>.
+              </p>
+            </div>
+          </div>
+
+          {/* iOS Safari */}
+          <div className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col justify-between">
+            <div>
+              <p className="text-[9px] font-black text-[#A855F7] uppercase tracking-wider mb-1">iOS / iPhone Safari</p>
+              <p className="text-[9px] text-zinc-400 leading-normal">
+                Buka Safari, tekan tombol Bagikan <strong className="text-white">[↑]</strong> di bagian bawah, lalu klik <strong className="text-white">"Tambahkan ke Layar Utama"</strong>.
+              </p>
+            </div>
+          </div>
+
+          {/* Windows / Mac Chrome */}
+          <div className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col justify-between">
+            <div>
+              <p className="text-[9px] font-black text-blue-400 uppercase tracking-wider mb-1">Desktop PC / Laptop</p>
+              <p className="text-[9px] text-zinc-400 leading-normal">
+                Gunakan Chrome/Edge, lalu klik ikon instalasi <strong className="text-white">⨁</strong> di kanan bilah alamat (URL bar) untuk menyimpan ke Desktop.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
