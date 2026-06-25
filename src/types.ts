@@ -58,3 +58,24 @@ export type RouterState = {
   downloadSpeed: number;
   uploadSpeed: number;
 };
+
+export type NvrRecording = {
+  id: number;
+  camera_id: string;
+  camera_name: string;
+  start_ts: number;
+  end_ts: number;
+  duration: number;
+  size: number;
+  thumb: string | null;
+};
+
+export type NvrDetection = {
+  id: number;
+  camera_id: string;
+  camera_name: string;
+  ts: number;
+  label: string;
+  score: number;
+  thumb: string | null;
+};

@@ -6,6 +6,7 @@ import dgram from "dgram";
 import { exec } from "child_process";
 import { createServer as createViteServer } from "vite";
 import onvif from "onvif";
+import { registerNvr } from "./nvr/index";
 
 const { Cam } = onvif;
 
@@ -675,6 +676,9 @@ async function startServer() {
       res.status(502).json({ success: false, message: "Gagal menjalankan speed test", error: String(error?.message || error) });
     }
   });
+
+  // 5. NVR: real CCTV recording + local AI (person/motion) detection
+  await registerNvr(app, () => deviceConfig);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

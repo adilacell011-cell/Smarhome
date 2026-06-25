@@ -1,1 +1,2 @@
 - [LAN device constraint](lan-device-constraint.md) — this dashboard controls home-LAN devices (WiZ/CCTV/TV/router); cloud deploy can't reach them, real device features only work when run on the home network.
+- [NVR portable stack](nvr-portable-stack.md) — local CCTV record + AI uses sql.js/tfjs-wasm/coco-ssd + system ffmpeg (no native deps); process.cwd() wasm paths; never fabricate camera ids.
