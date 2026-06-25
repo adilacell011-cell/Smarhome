@@ -260,7 +260,7 @@ export default function App() {
       fetch('/api/tv/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: targetState ? 'KEY_POWER' : 'KEY_POWER' })
+        body: JSON.stringify({ command: 'power' })
       }).catch(console.error);
     }
   };
@@ -439,7 +439,7 @@ export default function App() {
                     fetch('/api/tv/control', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ command: 'LAUNCH_APP', value: 'com.google.android.youtube.tv' })
+                      body: JSON.stringify({ command: 'launch_app', value: 'com.google.android.youtube.tv' })
                     });
                     setNotificationMessage('Meluncurkan YouTube di Android TV...');
                   }}

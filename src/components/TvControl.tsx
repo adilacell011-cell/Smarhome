@@ -66,7 +66,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
           onClick={() => {
             const nextOn = !state.isOn;
             setState({ ...state, isOn: nextOn });
-            sendCommand('KEY_POWER');
+            sendCommand('power');
           }}
           className={`p-3.5 rounded-2xl transition-all duration-300 ${
             state.isOn
@@ -86,7 +86,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
               
               {/* UP */}
               <button
-                onClick={() => sendCommand('KEY_UP')}
+                onClick={() => sendCommand('up')}
                 className="absolute top-1.5 p-2 text-zinc-400 hover:text-[#F97316] active:scale-95 transition-all"
                 title="Up"
               >
@@ -95,7 +95,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
 
               {/* LEFT */}
               <button
-                onClick={() => sendCommand('KEY_LEFT')}
+                onClick={() => sendCommand('left')}
                 className="absolute left-1.5 p-2 text-zinc-400 hover:text-[#F97316] active:scale-95 transition-all"
                 title="Left"
               >
@@ -104,7 +104,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
 
               {/* CENTER / ENTER */}
               <button
-                onClick={() => sendCommand('KEY_ENTER')}
+                onClick={() => sendCommand('center')}
                 className="w-14 h-14 bg-[#F97316] hover:bg-orange-600 active:scale-90 rounded-full flex items-center justify-center text-white font-black text-sm shadow-lg shadow-orange-500/20 transition-all duration-300"
                 title="OK"
               >
@@ -113,7 +113,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
 
               {/* RIGHT */}
               <button
-                onClick={() => sendCommand('KEY_RIGHT')}
+                onClick={() => sendCommand('right')}
                 className="absolute right-1.5 p-2 text-zinc-400 hover:text-[#F97316] active:scale-95 transition-all"
                 title="Right"
               >
@@ -122,7 +122,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
 
               {/* DOWN */}
               <button
-                onClick={() => sendCommand('KEY_DOWN')}
+                onClick={() => sendCommand('down')}
                 className="absolute bottom-1.5 p-2 text-zinc-400 hover:text-[#F97316] active:scale-95 transition-all"
                 title="Down"
               >
@@ -135,21 +135,21 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
           {/* Navigation & Volume buttons */}
           <div className="grid grid-cols-3 gap-2.5">
             <button
-              onClick={() => sendCommand('KEY_BACK')}
+              onClick={() => sendCommand('back')}
               className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <CornerDownLeft size={16} />
               <span className="text-[9px] sm:text-[10px] tracking-wider uppercase mt-1">Back</span>
             </button>
             <button
-              onClick={() => sendCommand('KEY_HOME')}
+              onClick={() => sendCommand('home')}
               className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <Home size={16} />
               <span className="text-[9px] sm:text-[10px] tracking-wider uppercase mt-1">Home</span>
             </button>
             <button
-              onClick={() => sendCommand('KEY_MENU')}
+              onClick={() => sendCommand('menu')}
               className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 font-bold border border-zinc-800 transition-all"
             >
               <Menu size={16} />
@@ -160,7 +160,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
               onClick={() => {
                 const nextVol = Math.max(0, state.volume - 1);
                 setState({ ...state, volume: nextVol });
-                sendCommand('VOLUME_DOWN', nextVol);
+                sendCommand('volume_down', nextVol);
               }}
               className="flex items-center justify-center gap-1.5 p-2 sm:p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
             >
@@ -174,7 +174,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
               onClick={() => {
                 const nextVol = Math.min(30, state.volume + 1);
                 setState({ ...state, volume: nextVol });
-                sendCommand('VOLUME_UP', nextVol);
+                sendCommand('volume_up', nextVol);
               }}
               className="flex items-center justify-center gap-1.5 p-2 sm:p-3 bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-2xl text-zinc-300 border border-zinc-800 transition-all"
             >
@@ -192,7 +192,7 @@ export default function TvControl({ tvName, tvIp }: TvControlProps) {
                   key={app.name}
                   onClick={() => {
                     setState({ ...state, currentApp: app.name });
-                    sendCommand('LAUNCH_APP', app.package);
+                    sendCommand('launch_app', app.package);
                   }}
                   className={`p-2 sm:p-3 rounded-xl text-[10px] sm:text-xs font-bold transition-all border flex items-center justify-center gap-2 ${
                     state.currentApp === app.name

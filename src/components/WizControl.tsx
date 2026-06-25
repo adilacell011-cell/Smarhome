@@ -122,23 +122,10 @@ export default function WizControl({ wizName, wizIp, wizPort, wizLamps, onEditLa
     }
   }, [wizLamps]);
 
-  // Fetch status of selected lamp when it changes
+  // Re-sync status when the selected lamp changes (reuses fetchRealStatus)
   useEffect(() => {
     if (selectedLamp) {
-      fetch('/api/wiz/status')
-        .then(res => res.json())
-        .then(data => {
-          if (data.success && data.statuses && data.statuses[selectedLamp.id]) {
-            const s = data.statuses[selectedLamp.id];
-            setState(prev => ({
-              ...prev,
-              isOn: s.isOn,
-              brightness: s.brightness,
-              colorTemp: s.colorTemp,
-            }));
-          }
-        })
-        .catch(console.error);
+      fetchRealStatus();
     }
   }, [selectedLamp]);
 

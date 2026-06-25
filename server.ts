@@ -493,24 +493,24 @@ async function startServer() {
     const targetIp = deviceConfig.tvIp;
     
     // Mapping command to ADB keycodes
-    let adbKey = "";
-    switch (command) {
-      case "power": adbKey = "KEYCODE_POWER"; break;
-      case "home": adbKey = "KEYCODE_HOME"; break;
-      case "back": adbKey = "KEYCODE_BACK"; break;
-      case "up": adbKey = "KEYCODE_DPAD_UP"; break;
-      case "down": adbKey = "KEYCODE_DPAD_DOWN"; break;
-      case "left": adbKey = "KEYCODE_DPAD_LEFT"; break;
-      case "right": adbKey = "KEYCODE_DPAD_RIGHT"; break;
-      case "center": adbKey = "KEYCODE_DPAD_CENTER"; break;
-      case "volume_up": adbKey = "KEYCODE_VOLUME_UP"; break;
-      case "volume_down": adbKey = "KEYCODE_VOLUME_DOWN"; break;
-      case "mute": adbKey = "KEYCODE_VOLUME_MUTE"; break;
-      case "youtube": adbKey = "launch_youtube"; break;
-      default: adbKey = value || "";
-    }
+    const keyMap: { [key: string]: string } = {
+      power: "KEYCODE_POWER",
+      home: "KEYCODE_HOME",
+      back: "KEYCODE_BACK",
+      menu: "KEYCODE_MENU",
+      up: "KEYCODE_DPAD_UP",
+      down: "KEYCODE_DPAD_DOWN",
+      left: "KEYCODE_DPAD_LEFT",
+      right: "KEYCODE_DPAD_RIGHT",
+      center: "KEYCODE_DPAD_CENTER",
+      enter: "KEYCODE_DPAD_CENTER",
+      volume_up: "KEYCODE_VOLUME_UP",
+      volume_down: "KEYCODE_VOLUME_DOWN",
+      mute: "KEYCODE_VOLUME_MUTE"
+    };
+    const adbKey = keyMap[command] || "";
 
-    console.log(`[Android TV ADB] Memproses perintah: ${command} (${adbKey}) untuk TV ${targetIp}`);
+    console.log(`[Android TV ADB] Memproses perintah: ${command} (${adbKey || value || ""}) untuk TV ${targetIp}`);
 
     // Execute ADB CLI if available on the system
     try {
@@ -520,9 +520,14 @@ async function startServer() {
           return;
         }
 
+        // Only allow safe Android package names to prevent shell command injection
+        const isValidPackage = typeof value === "string" && /^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)+$/.test(value);
+
         let fullCommand = "";
-        if (adbKey === "launch_youtube") {
+        if (command === "youtube") {
           fullCommand = `adb connect ${targetIp} && adb shell am start -a android.intent.action.VIEW -d "vnd.youtube:"`;
+        } else if (command === "launch_app" && isValidPackage) {
+          fullCommand = `adb connect ${targetIp} && adb shell monkey -p ${value} -c android.intent.category.LAUNCHER 1`;
         } else if (adbKey) {
           fullCommand = `adb connect ${targetIp} && adb shell input keyevent ${adbKey}`;
         }
