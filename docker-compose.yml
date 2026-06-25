@@ -1,17 +1,17 @@
 services:
   adilanet-dashboard:
     # ---------------------------------------------------------------
-    # OPSI A (disarankan): tarik image yang sudah Anda build di GitHub
-    # (GitHub Actions -> GHCR). Nama image GHCR selalu huruf kecil.
+    # OPSI B (AKTIF): Dockge build sendiri langsung dari repo GitHub Anda.
+    # Tidak perlu GitHub Actions / GHCR. Repo harus PUBLIC agar bisa di-clone.
     # ---------------------------------------------------------------
-    image: ghcr.io/adilacell011-cell/smarhome:latest
+    build:
+      context: https://github.com/adilacell011-cell/Smarhome.git#main
 
     # ---------------------------------------------------------------
-    # OPSI B: build langsung dari repo GitHub (tanpa GHCR).
-    # Matikan baris "image:" di atas, lalu aktifkan blok di bawah.
+    # OPSI A: kalau nanti Anda pasang GitHub Actions + GHCR, matikan blok
+    # "build:" di atas, lalu aktifkan baris image berikut (huruf kecil):
     # ---------------------------------------------------------------
-    # build:
-    #   context: https://github.com/adilacell011-cell/Smarhome.git#main
+    # image: ghcr.io/adilacell011-cell/smarhome:latest
 
     container_name: adilanet-dashboard
     restart: unless-stopped
