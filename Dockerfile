@@ -6,8 +6,7 @@ WORKDIR /app
 
 # Install ALL dependencies (incl. dev) needed to build.
 # Use `npm install` (not `npm ci`): more tolerant of platform-specific
-# optional native packages (rollup/lightningcss/tailwind-oxide) during
-# cross-architecture (arm64 via QEMU) builds.
+# optional native packages (rollup/lightningcss/tailwind-oxide).
 COPY package*.json ./
 RUN npm install --no-audit --no-fund
 

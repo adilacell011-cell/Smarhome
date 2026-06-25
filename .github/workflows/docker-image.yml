@@ -7,18 +7,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Native arm64 runner (free for public repos). Builds the arm64 image
+    # WITHOUT QEMU emulation, which previously crashed `npm install` with an
+    # out-of-memory error ("Exit handler never called"). The target is an
+    # arm64 STB/Armbian board, so a single linux/arm64 image is all we need.
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # QEMU + Buildx enable multi-architecture builds (amd64 for PCs,
-      # arm64 for SBC/Armbian boards).
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -43,7 +42,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

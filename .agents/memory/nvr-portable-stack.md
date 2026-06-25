@@ -61,8 +61,15 @@ Deployed to the user's own LAN server via Dockge, not Replit. Non-obvious constr
   PORT||5000; with host mode `ports:` is ignored. Bridge mode works for unicast control but loses discovery.
 - Persist `./config` (login + device settings, incl. gitignored device-config.json) and `./data`
   (recordings/thumbs/db) as volumes, or the user loses everything on container recreate.
-- Image published multi-arch (amd64+arm64) to GHCR via GitHub Actions — target is likely arm64 (Armbian SBC).
-  No native node addons (deliberate, see above) so QEMU multi-arch build is cheap.
+- Image published to GHCR via GitHub Actions; target is an arm64 STB/Armbian SBC, so build linux/arm64 ONLY.
+- DO NOT build arm64 via QEMU emulation (docker buildx on ubuntu-latest). Even with no native node addons,
+  the heavy `npm install` (TensorFlow tree) under QEMU crashes with OOM: `npm error Exit handler never called!`
+  → build fails (exit 1). Fix that worked: run the workflow on GitHub's NATIVE arm64 runner
+  (`runs-on: ubuntu-24.04-arm`, free for public repos), no setup-qemu, `platforms: linux/arm64`.
+  Native amd64 build (and native arm64) of this Dockerfile succeeds; only emulated arm64 fails.
+- Also use `npm install` (not `npm ci`) in the Dockerfile — more tolerant of platform-specific optional
+  native pkgs (rollup/lightningcss/tailwind-oxide). Building on the low-power STB itself is also too heavy
+  (slow + RAM risk); prefer build-on-GitHub-then-pull, STB only does `docker pull` (light).
 
 ## App login gate — `server.ts`
 The whole dashboard is behind a mandatory login. Credentials live in dashboard config
