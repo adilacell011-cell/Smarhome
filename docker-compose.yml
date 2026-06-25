@@ -2,17 +2,16 @@ services:
   adilanet-dashboard:
     # ---------------------------------------------------------------
     # OPSI A (disarankan): tarik image yang sudah Anda build di GitHub
-    # (GitHub Actions -> GHCR). Ganti USERNAME/REPO dengan repo GitHub
-    # Anda (huruf kecil semua). Contoh: ghcr.io/budi/adilanet:latest
+    # (GitHub Actions -> GHCR). Nama image GHCR selalu huruf kecil.
     # ---------------------------------------------------------------
-    image: ghcr.io/USERNAME/REPO:latest
+    image: ghcr.io/adilacell011-cell/smarhome:latest
 
     # ---------------------------------------------------------------
     # OPSI B: build langsung dari repo GitHub (tanpa GHCR).
     # Matikan baris "image:" di atas, lalu aktifkan blok di bawah.
     # ---------------------------------------------------------------
     # build:
-    #   context: https://github.com/USERNAME/REPO.git#main
+    #   context: https://github.com/adilacell011-cell/Smarhome.git#main
 
     container_name: adilanet-dashboard
     restart: unless-stopped
