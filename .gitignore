@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 data/
+config/device-config.json
 .DS_Store
 *.log
 .env*

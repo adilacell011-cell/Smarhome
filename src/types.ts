@@ -36,6 +36,7 @@ export type SmartConfig = {
   routerPassword?: string;
   telegramBotToken?: string;
   telegramChatId?: string;
+  appUsername?: string;
 };
 
 export type WizState = {

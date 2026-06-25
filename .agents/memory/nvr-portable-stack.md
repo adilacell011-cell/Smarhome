@@ -51,6 +51,25 @@ awaited (don't block the analysis loop). Hard constraints learned in review:
   ANY item is invalid. Never persist a filtered subset — a single malformed entry would silently
   delete all the user's saved rules/schedules.
 
+## App login gate — `server.ts`
+The whole dashboard is behind a mandatory login. Credentials live in dashboard config
+(`config/device-config.json`) like every other setting — username plaintext (`appUsername`),
+password as scrypt `salt:hash` (`appPasswordHash`), NEVER env secrets. **Why:** same reason as
+Telegram — user configures everything in the UI on their own LAN server. Default first-run login
+is `admin` / `admin123` (hash generated + persisted on first boot if missing).
+Hard constraints learned in review:
+- `config/device-config.json` MUST stay gitignored — it holds RTSP creds, telegram token, and the
+  password hash. It is runtime state, never versioned (the other `config/*.json` schedule files are
+  fine to track).
+- GET /api/settings strips `appPasswordHash`; POST /api/settings strips BOTH `appPasswordHash` and
+  `appUsername` so credentials can only change via `/api/auth/credentials` (which requires the
+  current password). Never let the login hash reach the client.
+- Sessions are an in-memory Map (httpOnly cookie `sid`, 30-day TTL) — fine that a server restart
+  logs everyone out. On ANY credential change, `sessions.clear()` then mint a fresh session for the
+  caller, so old/stolen tokens die immediately while the current user stays in.
+- Auth middleware gates all `/api/*` except `/api/auth/login|status|logout`. Browser sends the
+  cookie automatically for `<img>`/`<video>` src, so thumbnails/streams behind auth just work.
+
 ## Telegram snapshot bot — `nvr/telegram.ts`
 Scheduled camera snapshots auto-sent to an admin Telegram chat. Bot token + chat ID live in
 the DASHBOARD config (`config/device-config.json`, surfaced in SettingsPanel → Telegram tab),

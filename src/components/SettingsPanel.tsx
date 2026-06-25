@@ -1,14 +1,61 @@
 import { useState, FormEvent } from 'react';
-import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe, RefreshCw, Send } from 'lucide-react';
+import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe, RefreshCw, Send, Lock, LogOut, Eye, EyeOff, User } from 'lucide-react';
 import type { SmartConfig } from '../types';
 
 interface SettingsPanelProps {
   config: SmartConfig;
   onSave: (newConfig: SmartConfig) => void;
+  onLogout: () => void;
 }
 
-export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'wiz' | 'cctv' | 'tv' | 'router' | 'telegram'>('wiz');
+export default function SettingsPanel({ config, onSave, onLogout }: SettingsPanelProps) {
+  const [activeSubTab, setActiveSubTab] = useState<'wiz' | 'cctv' | 'tv' | 'router' | 'telegram' | 'account'>('wiz');
+
+  // Account / login credential states
+  const [acctUsername, setAcctUsername] = useState(config.appUsername || 'admin');
+  const [acctCurrent, setAcctCurrent] = useState('');
+  const [acctNew, setAcctNew] = useState('');
+  const [acctConfirm, setAcctConfirm] = useState('');
+  const [acctShowPw, setAcctShowPw] = useState(false);
+  const [acctSaving, setAcctSaving] = useState(false);
+  const [acctResult, setAcctResult] = useState<{ success: boolean; msg: string } | null>(null);
+
+  const handleSaveAccount = async () => {
+    if (!acctCurrent) {
+      setAcctResult({ success: false, msg: 'Masukkan password saat ini untuk mengubah akun.' });
+      return;
+    }
+    if (acctNew && acctNew !== acctConfirm) {
+      setAcctResult({ success: false, msg: 'Konfirmasi password baru tidak cocok.' });
+      return;
+    }
+    setAcctSaving(true);
+    setAcctResult(null);
+    try {
+      const res = await fetch('/api/auth/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: acctUsername,
+          currentPassword: acctCurrent,
+          newPassword: acctNew || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAcctResult({ success: true, msg: 'Akun berhasil diperbarui. Gunakan kredensial baru saat login berikutnya.' });
+        setAcctCurrent('');
+        setAcctNew('');
+        setAcctConfirm('');
+      } else {
+        setAcctResult({ success: false, msg: data.message || 'Gagal memperbarui akun.' });
+      }
+    } catch {
+      setAcctResult({ success: false, msg: 'Koneksi ke server gagal.' });
+    }
+    setAcctSaving(false);
+  };
+
   const [form, setForm] = useState<SmartConfig>({
     ...config,
     wizLamps: config.wizLamps || [
@@ -276,7 +323,7 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
         </div>
 
         {/* Sub-Tabs Selector for Mobile/PWA Optimization */}
-        <div className="grid grid-cols-5 gap-1.5 p-1 bg-zinc-950 rounded-2xl mb-5 border border-zinc-900 overflow-x-auto no-scrollbar">
+        <div className="grid grid-cols-6 gap-1.5 p-1 bg-zinc-950 rounded-2xl mb-5 border border-zinc-900 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveSubTab('wiz')}
@@ -336,6 +383,18 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
           >
             <Send size={14} />
             <span className="hidden xs:inline">Telegram</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('account')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-1 rounded-xl text-[10px] font-extrabold transition-all duration-200 cursor-pointer ${
+              activeSubTab === 'account'
+                ? 'bg-[#F97316] text-white shadow-sm'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/50'
+            }`}
+          >
+            <Lock size={14} />
+            <span className="hidden xs:inline">Akun</span>
           </button>
         </div>
 
@@ -768,6 +827,103 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
             </div>
           )}
 
+          {/* 6. Account / Login Credentials */}
+          {activeSubTab === 'account' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-900 space-y-3">
+                <span className="text-[10px] font-black text-orange-400 tracking-widest block uppercase">Akun Login Aplikasi</span>
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  Ubah username dan password untuk masuk ke dashboard. Masukkan password saat ini untuk mengonfirmasi perubahan.
+                </p>
+
+                <div>
+                  <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Username</label>
+                  <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 rounded-xl focus-within:ring-1 focus-within:ring-[#F97316]/50 transition-all">
+                    <User size={14} className="text-zinc-500 shrink-0" />
+                    <input
+                      type="text"
+                      value={acctUsername}
+                      onChange={(e) => setAcctUsername(e.target.value)}
+                      placeholder="Username login"
+                      autoComplete="username"
+                      className="flex-1 bg-transparent text-xs font-medium text-white placeholder-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Password Saat Ini</label>
+                  <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 rounded-xl focus-within:ring-1 focus-within:ring-[#F97316]/50 transition-all">
+                    <Lock size={14} className="text-zinc-500 shrink-0" />
+                    <input
+                      type={acctShowPw ? 'text' : 'password'}
+                      value={acctCurrent}
+                      onChange={(e) => setAcctCurrent(e.target.value)}
+                      placeholder="Password yang dipakai sekarang"
+                      autoComplete="current-password"
+                      className="flex-1 bg-transparent text-xs font-medium text-white placeholder-zinc-600 focus:outline-none"
+                    />
+                    <button type="button" onClick={() => setAcctShowPw(v => !v)} className="text-zinc-500 hover:text-zinc-300 shrink-0">
+                      {acctShowPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-zinc-900/60">
+                  <div>
+                    <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block mt-2">Password Baru</label>
+                    <input
+                      type="password"
+                      value={acctNew}
+                      onChange={(e) => setAcctNew(e.target.value)}
+                      placeholder="Kosongkan jika tidak diubah"
+                      autoComplete="new-password"
+                      className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block md:mt-2">Konfirmasi Password Baru</label>
+                    <input
+                      type="password"
+                      value={acctConfirm}
+                      onChange={(e) => setAcctConfirm(e.target.value)}
+                      placeholder="Ulangi password baru"
+                      autoComplete="new-password"
+                      className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-medium focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {acctResult && (
+                  <div className={`p-3 rounded-xl text-[10px] border leading-relaxed font-medium ${
+                    acctResult.success
+                      ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
+                      : 'bg-red-500/5 border-red-500/20 text-red-400'
+                  }`}>
+                    {acctResult.msg}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleSaveAccount}
+                  disabled={acctSaving}
+                  className="w-full bg-[#F97316] hover:bg-orange-600 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-orange-500/10 cursor-pointer"
+                >
+                  <Save size={14} /> {acctSaving ? 'Menyimpan...' : 'Simpan Akun'}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={onLogout}
+                className="w-full bg-zinc-900 hover:bg-red-500/10 text-red-400 hover:text-red-300 border border-zinc-800 hover:border-red-500/30 font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <LogOut size={14} /> Keluar dari Aplikasi
+              </button>
+            </div>
+          )}
+
           {testingDevice && (
             <div className="p-2.5 bg-zinc-950 text-[#F97316] text-[9px] font-mono rounded-xl border border-zinc-900/60 animate-pulse">
               [PING] Requesting ICMP echo response packet from {testingDevice}...
@@ -781,12 +937,14 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="w-full bg-[#F97316] hover:bg-orange-600 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-orange-500/10 cursor-pointer"
-          >
-            <Save size={14} /> Simpan Konfigurasi
-          </button>
+          {activeSubTab !== 'account' && (
+            <button
+              type="submit"
+              className="w-full bg-[#F97316] hover:bg-orange-600 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-orange-500/10 cursor-pointer"
+            >
+              <Save size={14} /> Simpan Konfigurasi
+            </button>
+          )}
         </form>
       </div>
 

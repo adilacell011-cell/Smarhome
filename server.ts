@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import net from "net";
 import dgram from "dgram";
+import crypto from "crypto";
 import { exec } from "child_process";
 import { createServer as createViteServer } from "vite";
 import onvif from "onvif";
@@ -62,7 +63,9 @@ const DEFAULT_CONFIG = {
   routerIp: '192.168.1.1',
   routerPassword: '',
   telegramBotToken: '',
-  telegramChatId: ''
+  telegramChatId: '',
+  appUsername: 'admin',
+  appPasswordHash: ''
 };
 
 function readConfig() {
@@ -106,6 +109,50 @@ function parseRtspCreds(rtspUrl?: string): { username: string; password: string 
   return fallback;
 }
 
+// ---- Authentication helpers (login gate for the whole dashboard) ----
+const DEFAULT_PASSWORD = "admin123";
+const SESSION_TTL = 1000 * 60 * 60 * 24 * 30; // 30 days
+const sessions = new Map<string, { username: string; created: number }>();
+
+function hashPassword(pw: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(pw, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(pw: string, stored?: string): boolean {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt, hash] = stored.split(":");
+  const test = crypto.scryptSync(pw, salt, 64).toString("hex");
+  const a = Buffer.from(hash, "hex");
+  const b = Buffer.from(test, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function createSession(username: string): string {
+  const token = crypto.randomBytes(32).toString("hex");
+  sessions.set(token, { username, created: Date.now() });
+  return token;
+}
+
+function getSession(token: string): { username: string; created: number } | null {
+  const s = sessions.get(token);
+  if (!s) return null;
+  if (Date.now() - s.created > SESSION_TTL) { sessions.delete(token); return null; }
+  return s;
+}
+
+function parseCookies(req: express.Request): Record<string, string> {
+  const header = req.headers.cookie;
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx > -1) out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json());
@@ -114,16 +161,86 @@ async function startServer() {
   // Initial config load
   let deviceConfig = readConfig();
 
-  // Endpoint to get configuration
-  app.get("/api/settings", (req, res) => {
-    res.json({ success: true, config: deviceConfig });
+  // First run: ensure a login password hash exists (default user "admin" / pass "admin123")
+  if (!deviceConfig.appPasswordHash) {
+    if (!deviceConfig.appUsername) deviceConfig.appUsername = "admin";
+    deviceConfig.appPasswordHash = hashPassword(DEFAULT_PASSWORD);
+    writeConfig(deviceConfig);
+  }
+
+  // Auth gate: protect all /api routes except the auth handshake endpoints
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/")) return next();
+    if (req.path === "/api/auth/login" || req.path === "/api/auth/status" || req.path === "/api/auth/logout") return next();
+    const cookies = parseCookies(req);
+    const sess = cookies.sid ? getSession(cookies.sid) : null;
+    if (sess) { (req as any).authUser = sess.username; return next(); }
+    return res.status(401).json({ success: false, message: "Silakan login terlebih dahulu" });
   });
 
-  // Endpoint to update configuration
+  // Endpoint to get configuration (never expose the password hash)
+  app.get("/api/settings", (req, res) => {
+    const { appPasswordHash, ...safe } = deviceConfig as any;
+    res.json({ success: true, config: safe });
+  });
+
+  // Endpoint to update configuration (credentials are managed via /api/auth/* only)
   app.post("/api/settings", (req, res) => {
-    deviceConfig = { ...deviceConfig, ...req.body };
+    const body = { ...(req.body || {}) };
+    delete body.appPasswordHash;
+    delete body.appUsername;
+    deviceConfig = { ...deviceConfig, ...body };
     const saved = writeConfig(deviceConfig);
-    res.json({ success: saved, config: deviceConfig });
+    const { appPasswordHash, ...safe } = deviceConfig as any;
+    res.json({ success: saved, config: safe });
+  });
+
+  // ---- Authentication routes ----
+  app.get("/api/auth/status", (req, res) => {
+    const cookies = parseCookies(req);
+    const sess = cookies.sid ? getSession(cookies.sid) : null;
+    res.json({ success: true, authenticated: !!sess, username: sess ? sess.username : deviceConfig.appUsername });
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    const { username, password } = req.body || {};
+    if (typeof username !== "string" || typeof password !== "string") {
+      return res.status(400).json({ success: false, message: "Username dan password wajib diisi" });
+    }
+    if (username !== deviceConfig.appUsername || !verifyPassword(password, deviceConfig.appPasswordHash)) {
+      return res.status(401).json({ success: false, message: "Username atau password salah" });
+    }
+    const token = createSession(username);
+    res.cookie("sid", token, { httpOnly: true, sameSite: "lax", maxAge: SESSION_TTL, path: "/" });
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    const cookies = parseCookies(req);
+    if (cookies.sid) sessions.delete(cookies.sid);
+    res.clearCookie("sid", { path: "/" });
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/credentials", (req, res) => {
+    const { username, currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== "string" || !verifyPassword(currentPassword, deviceConfig.appPasswordHash)) {
+      return res.status(401).json({ success: false, message: "Password saat ini salah" });
+    }
+    if (typeof username === "string" && username.trim()) {
+      deviceConfig.appUsername = username.trim().slice(0, 60);
+    }
+    if (typeof newPassword === "string" && newPassword.length > 0) {
+      if (newPassword.length < 4) return res.status(400).json({ success: false, message: "Password baru minimal 4 karakter" });
+      deviceConfig.appPasswordHash = hashPassword(newPassword);
+    }
+    const saved = writeConfig(deviceConfig);
+    // Invalidate every existing session so old/stolen tokens stop working after a credential change,
+    // then issue a fresh session for the current user so they stay logged in.
+    sessions.clear();
+    const token = createSession(deviceConfig.appUsername);
+    res.cookie("sid", token, { httpOnly: true, sameSite: "lax", maxAge: SESSION_TTL, path: "/" });
+    res.json({ success: saved, username: deviceConfig.appUsername });
   });
 
   // 1. Philips WiZ Controls (Real UDP logic using Node dgram)

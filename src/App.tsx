@@ -13,10 +13,12 @@ import TvControl from './components/TvControl';
 import CctvControl from './components/CctvControl';
 import RouterControl from './components/RouterControl';
 import SettingsPanel from './components/SettingsPanel';
+import LoginPage from './components/LoginPage';
 import type { SmartConfig, WizLampConfig } from './types';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [authState, setAuthState] = useState<'checking' | 'in' | 'out'>('checking');
   const [config, setConfig] = useState<SmartConfig>({
     wizName: 'Lampu Utama Living Room',
     wizIp: '192.168.1.10',
@@ -154,12 +156,31 @@ export default function App() {
     }
   };
 
+  // Check authentication status once on mount
   useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(d => setAuthState(d.authenticated ? 'in' : 'out'))
+      .catch(() => setAuthState('out'));
+  }, []);
+
+  // Load config & start polling only after the user is authenticated
+  useEffect(() => {
+    if (authState !== 'in') return;
     loadConfig();
     // Poll the lamp status every 15 seconds to ensure browser refresh and dashboard are always real-time
     const interval = setInterval(fetchWizStatus, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [authState]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setAuthState('out');
+  };
 
   const handleSaveConfig = async (newConfig: SmartConfig) => {
     try {
@@ -271,6 +292,19 @@ export default function App() {
   const totalLightsCount = registeredLamps.length;
   const activeDisplaysCount = quickStates.smartTv ? 1 : 0;
   const camerasOnlineCount = deviceStatuses.cctv === 'online' ? 1 : 0;
+
+  // Auth gate: loading splash while checking, then login screen if not authenticated
+  if (authState === 'checking') {
+    return (
+      <div className="min-h-screen bg-[#0A0A0C] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-zinc-700 border-t-[#F97316] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (authState === 'out') {
+    return <LoginPage onSuccess={() => setAuthState('in')} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0A0A0C] font-sans text-zinc-100 pb-36 pt-4">
@@ -485,7 +519,7 @@ export default function App() {
 
         {/* TAB 5: INTEGRATION SETTINGS */}
         {activeTab === 'settings' && (
-          <SettingsPanel config={config} onSave={handleSaveConfig} />
+          <SettingsPanel config={config} onSave={handleSaveConfig} onLogout={handleLogout} />
         )}
 
       </div>
