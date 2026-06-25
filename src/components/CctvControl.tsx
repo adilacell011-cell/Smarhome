@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download } from 'lucide-react';
-import type { CctvConfig, NvrRecording, NvrDetection } from '../types';
+import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download, Zap, Plus, Lightbulb, Tv, PlayCircle } from 'lucide-react';
+import type { CctvConfig, NvrRecording, NvrDetection, AutomationRule, NvrDevices } from '../types';
 
 interface CctvControlProps {
   icseeName?: string;
@@ -26,6 +26,117 @@ const LABEL_ID: Record<string, string> = {
   bus: 'Bus', truck: 'Truk', cat: 'Kucing', dog: 'Anjing',
 };
 
+const DETECT_LABELS = ['person', 'car', 'motorcycle', 'bicycle', 'bus', 'truck', 'cat', 'dog'];
+
+const WIZ_COMMANDS: Record<string, string> = { on: 'Nyalakan Lampu', off: 'Matikan Lampu' };
+const TV_COMMANDS: Record<string, string> = { power: 'Power TV', youtube: 'Buka YouTube', mute: 'Mute TV' };
+
+function actionLabel(action: AutomationRule['action'], devices: NvrDevices): string {
+  if (action.deviceType === 'wiz') {
+    const name = action.deviceId === 'all' ? 'Semua Lampu' : (devices.lamps.find(l => l.id === action.deviceId)?.name || 'Lampu');
+    return `${WIZ_COMMANDS[action.command] || action.command} — ${name}`;
+  }
+  return TV_COMMANDS[action.command] || `TV: ${action.command}`;
+}
+
+function RuleForm({ devices, onSave, onCancel }: {
+  devices: NvrDevices;
+  onSave: (rule: AutomationRule) => void;
+  onCancel: () => void;
+}) {
+  const [cameraId, setCameraId] = useState<string>('any');
+  const [label, setLabel] = useState<string>('person');
+  const [deviceType, setDeviceType] = useState<'wiz' | 'tv'>('wiz');
+  const [deviceId, setDeviceId] = useState<string>('all');
+  const [command, setCommand] = useState<string>('on');
+  const [cooldownSec, setCooldownSec] = useState<number>(60);
+
+  const submit = () => {
+    const id = (globalThis.crypto?.randomUUID?.() || `rule_${Date.now()}`);
+    const action = deviceType === 'wiz'
+      ? { deviceType, deviceId, command }
+      : { deviceType, deviceId: 'tv', command };
+    onSave({ id, enabled: true, cameraId, label, action, cooldownSec });
+  };
+
+  const selClass = 'bg-[#1C1C1F] border border-zinc-800 text-xs font-bold text-zinc-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 w-full';
+
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3">
+      <p className="text-[10px] font-extrabold text-orange-400 uppercase tracking-widest">Buat Aturan Baru</p>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">JIKA Kamera</label>
+          <select value={cameraId} onChange={e => setCameraId(e.target.value)} className={selClass}>
+            <option value="any">Semua Kamera</option>
+            {devices.cameras.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Mendeteksi</label>
+          <select value={label} onChange={e => setLabel(e.target.value)} className={selClass}>
+            <option value="any">Apa Saja</option>
+            {DETECT_LABELS.map(l => <option key={l} value={l}>{LABEL_ID[l] || l}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">MAKA Perangkat</label>
+          <select
+            value={deviceType}
+            onChange={e => {
+              const dt = e.target.value as 'wiz' | 'tv';
+              setDeviceType(dt);
+              if (dt === 'wiz') { setDeviceId('all'); setCommand('on'); }
+              else { setDeviceId('tv'); setCommand('power'); }
+            }}
+            className={selClass}
+          >
+            <option value="wiz">Lampu WiZ</option>
+            {devices.tv && <option value="tv">Android TV</option>}
+          </select>
+        </div>
+        {deviceType === 'wiz' ? (
+          <div>
+            <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Pilih Lampu</label>
+            <select value={deviceId} onChange={e => setDeviceId(e.target.value)} className={selClass}>
+              <option value="all">Semua Lampu</option>
+              {devices.lamps.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+        ) : <div />}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Aksi</label>
+          <select value={command} onChange={e => setCommand(e.target.value)} className={selClass}>
+            {Object.entries(deviceType === 'wiz' ? WIZ_COMMANDS : TV_COMMANDS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Jeda (detik)</label>
+          <input
+            type="number" min={0} value={cooldownSec}
+            onChange={e => setCooldownSec(Math.max(0, parseInt(e.target.value) || 0))}
+            className={selClass}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button onClick={submit} className="flex-1 bg-orange-500/15 border border-orange-500/40 text-orange-400 font-extrabold text-[11px] uppercase tracking-wider py-2.5 rounded-xl hover:bg-orange-500/25 transition-all">Simpan Aturan</button>
+        <button onClick={onCancel} className="px-4 bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold text-[11px] uppercase tracking-wider py-2.5 rounded-xl hover:bg-zinc-800 transition-all">Batal</button>
+      </div>
+    </div>
+  );
+}
+
 export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlProps) {
   const [selectedCctv, setSelectedCctv] = useState<CctvConfig | null>(null);
   const [refreshKey, setRefreshKey] = useState<number>(Date.now());
@@ -41,6 +152,12 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   const [recordings, setRecordings] = useState<NvrRecording[]>([]);
   const [detections, setDetections] = useState<NvrDetection[]>([]);
   const [playingId, setPlayingId] = useState<number | null>(null);
+
+  // Automation state
+  const [rules, setRules] = useState<AutomationRule[]>([]);
+  const [devices, setDevices] = useState<NvrDevices>({ lamps: [], cameras: [], tv: null });
+  const [showRuleForm, setShowRuleForm] = useState(false);
+  const [autoMessage, setAutoMessage] = useState<string | null>(null);
 
   const [testingConn, setTestingConn] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -98,6 +215,62 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   useEffect(() => {
     if (activeIp) setRefreshKey(Date.now());
   }, [selectedCctv, icseeIp]);
+
+  const loadAutomation = useCallback(async () => {
+    try {
+      const [devRes, ruleRes] = await Promise.all([
+        fetch('/api/nvr/devices'),
+        fetch('/api/nvr/rules'),
+      ]);
+      const dev = await devRes.json();
+      const rule = await ruleRes.json();
+      if (dev.success) setDevices({ lamps: dev.lamps || [], cameras: dev.cameras || [], tv: dev.tv || null });
+      if (rule.success) setRules(rule.rules || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => { loadAutomation(); }, [loadAutomation]);
+
+  const persistRules = async (next: AutomationRule[]) => {
+    setRules(next);
+    try {
+      await fetch('/api/nvr/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules: next }),
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const toggleRule = (id: string) => {
+    persistRules(rules.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+  };
+
+  const removeRule = async (id: string) => {
+    setRules(rules.filter(r => r.id !== id));
+    try { await fetch(`/api/nvr/rules/${id}`, { method: 'DELETE' }); } catch (err) { console.error(err); }
+  };
+
+  const testAction = async (action: AutomationRule['action']) => {
+    setAutoMessage('Menguji aksi...');
+    try {
+      const res = await fetch('/api/nvr/rules/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      setAutoMessage(data.message || (data.success ? 'Berhasil' : 'Gagal'));
+    } catch (err) {
+      console.error(err);
+      setAutoMessage('Gagal mengirim aksi');
+    }
+    setTimeout(() => setAutoMessage(null), 5000);
+  };
 
   const handleRefresh = () => {
     setLoading(true);
@@ -452,6 +625,74 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Automation rules */}
+        <div className="border-t border-zinc-800/60 pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5"><Zap size={13} className="text-amber-400" /> Otomatisasi AI</span>
+            {!showRuleForm && (
+              <button onClick={() => setShowRuleForm(true)} className="flex items-center gap-1 px-2.5 py-1.5 bg-orange-500/10 border border-orange-500/20 text-orange-400 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-orange-500/20 transition-all">
+                <Plus size={12} /> Aturan
+              </button>
+            )}
+          </div>
+          <p className="text-[10px] text-zinc-600 font-mono leading-relaxed">Jika AI mendeteksi objek tertentu, perangkat otomatis dijalankan (mis. nyalakan lampu saat ada orang).</p>
+
+          {showRuleForm && (
+            <RuleForm
+              devices={devices}
+              onSave={(rule) => { persistRules([...rules, rule]); setShowRuleForm(false); }}
+              onCancel={() => setShowRuleForm(false)}
+            />
+          )}
+
+          {autoMessage && (
+            <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-center text-[10px] font-mono text-amber-400">{autoMessage}</div>
+          )}
+
+          {rules.length === 0 && !showRuleForm ? (
+            <p className="text-[10px] text-zinc-600 font-mono py-1">Belum ada aturan otomatis.</p>
+          ) : (
+            <div className="space-y-2">
+              {rules.map((r) => {
+                const camName = r.cameraId === 'any' ? 'Semua Kamera' : (devices.cameras.find(c => c.id === r.cameraId)?.name || r.cameraId);
+                const objName = r.label === 'any' ? 'apa saja' : (LABEL_ID[r.label] || r.label);
+                return (
+                  <div key={r.id} className={`bg-zinc-900/40 p-3 rounded-xl border ${r.enabled ? 'border-amber-500/20' : 'border-zinc-800/60'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-zinc-300 leading-snug">
+                          <span className="text-zinc-500">Jika</span> <b className="text-white">{camName}</b> <span className="text-zinc-500">deteksi</span> <b className="text-emerald-400">{objName}</b>
+                        </p>
+                        <p className="text-[11px] text-zinc-300 leading-snug mt-0.5 flex items-center gap-1">
+                          <span className="text-zinc-500">maka</span>
+                          {r.action.deviceType === 'wiz' ? <Lightbulb size={11} className="text-amber-400" /> : <Tv size={11} className="text-purple-400" />}
+                          <b className="text-white truncate">{actionLabel(r.action, devices)}</b>
+                        </p>
+                        <p className="text-[9px] text-zinc-600 font-mono mt-1">jeda {r.cooldownSec}d</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => testAction(r.action)} className="p-1.5 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all" title="Uji aksi">
+                          <PlayCircle size={15} />
+                        </button>
+                        <button
+                          onClick={() => toggleRule(r.id)}
+                          className={`relative w-9 h-5 rounded-full transition-all ${r.enabled ? 'bg-amber-500' : 'bg-zinc-700'}`}
+                          title={r.enabled ? 'Nonaktifkan' : 'Aktifkan'}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${r.enabled ? 'left-4.5' : 'left-0.5'}`} style={{ left: r.enabled ? '18px' : '2px' }}></span>
+                        </button>
+                        <button onClick={() => removeRule(r.id)} className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all" title="Hapus aturan">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

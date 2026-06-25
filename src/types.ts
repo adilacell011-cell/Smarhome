@@ -79,3 +79,25 @@ export type NvrDetection = {
   score: number;
   thumb: string | null;
 };
+
+export type AutomationAction = {
+  deviceType: 'wiz' | 'tv';
+  deviceId: string;
+  command: string;
+};
+
+export type AutomationRule = {
+  id: string;
+  name?: string;
+  enabled: boolean;
+  cameraId: string;
+  label: string;
+  action: AutomationAction;
+  cooldownSec: number;
+};
+
+export type NvrDevices = {
+  lamps: Array<{ id: string; name: string }>;
+  cameras: Array<{ id: string; name: string }>;
+  tv: { id: string; name: string } | null;
+};

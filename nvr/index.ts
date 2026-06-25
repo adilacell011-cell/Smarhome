@@ -9,6 +9,9 @@ import {
 import {
   startDetection, stopDetection, detectionStatus, isModelReady, stopAllDetections,
 } from "./detector";
+import {
+  initAutomation, listRules, saveRules, deleteRule, runAction, type AutomationRule,
+} from "./automation";
 
 type GetConfig = () => any;
 
@@ -33,6 +36,7 @@ function resolveCamera(getConfig: GetConfig, cameraId: string): Camera | null {
 
 export async function registerNvr(app: Express, getConfig: GetConfig) {
   await initStore();
+  initAutomation(getConfig);
 
   const cleanup = () => {
     stopAllRecordings();
@@ -83,6 +87,46 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
   app.get("/api/nvr/detections", (req: Request, res: Response) => {
     const cameraId = req.query.cameraId as string | undefined;
     res.json({ success: true, detections: listDetections(cameraId) });
+  });
+
+  // ---- Automation rules: "if AI detects X on camera Y -> do action Z" ----
+
+  // Devices available as automation targets (lamps + TV), sourced from live config.
+  app.get("/api/nvr/devices", (req: Request, res: Response) => {
+    const cfg = getConfig();
+    const lamps = (cfg.wizLamps && cfg.wizLamps.length
+      ? cfg.wizLamps
+      : (cfg.wizIp ? [{ id: "wiz", name: cfg.wizName || "Lampu", ip: cfg.wizIp, port: cfg.wizPort }] : [])
+    ).map((l: any) => ({ id: l.id, name: l.name }));
+    const cameras = (cfg.cctvs && cfg.cctvs.length
+      ? cfg.cctvs
+      : (cfg.icseeIp ? [{ id: "icsee", name: cfg.icseeName || "CCTV" }] : [])
+    ).map((c: any) => ({ id: c.id, name: c.name }));
+    res.json({ success: true, lamps, cameras, tv: cfg.tvIp ? { id: "tv", name: cfg.tvName || "Android TV" } : null });
+  });
+
+  app.get("/api/nvr/rules", (req: Request, res: Response) => {
+    res.json({ success: true, rules: listRules() });
+  });
+
+  app.post("/api/nvr/rules", (req: Request, res: Response) => {
+    const incoming = req.body?.rules;
+    if (!Array.isArray(incoming)) return res.status(400).json({ success: false, message: "Format aturan tidak valid" });
+    const saved = saveRules(incoming as AutomationRule[]);
+    res.json({ success: true, rules: saved });
+  });
+
+  app.delete("/api/nvr/rules/:id", (req: Request, res: Response) => {
+    const ok = deleteRule(req.params.id);
+    res.json({ success: ok, rules: listRules() });
+  });
+
+  // Fire a rule's action once, so the user can verify wiring without waiting for a detection.
+  app.post("/api/nvr/rules/test", async (req: Request, res: Response) => {
+    const action = req.body?.action;
+    if (!action || !action.deviceType) return res.status(400).json({ success: false, message: "Aksi tidak valid" });
+    const result = await runAction(action);
+    res.json({ success: result.ok, message: result.detail });
   });
 
   // Stream a recording with HTTP range support (for seeking in the player)

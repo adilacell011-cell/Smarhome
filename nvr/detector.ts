@@ -2,6 +2,7 @@ import path from "path";
 import fs from "fs";
 import { spawn } from "child_process";
 import { THUMB_DIR, addDetection } from "./store";
+import { onDetection } from "./automation";
 import type { Camera } from "./recorder";
 
 const INTERVAL_MS = 3000; // how often a frame is analysed
@@ -104,6 +105,7 @@ async function analyseOnce(state: DetState) {
         thumb: savedThumb,
       });
       console.log(`[NVR AI] ${state.camera.name}: ${p.class} (${(p.score * 100).toFixed(0)}%)`);
+      onDetection(state.camera.id, p.class);
     }
   } catch (err: any) {
     console.error(`[NVR AI] ${state.camera.id} analisa gagal:`, err?.message || err);

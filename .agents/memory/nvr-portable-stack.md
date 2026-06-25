@@ -34,3 +34,15 @@ Use `process.cwd()`-based paths, not import.meta/__dirname (which point into dis
   configured camera, never fabricate one — otherwise arbitrary ids spawn unbounded ffmpeg
   sessions (DoS). Fallback single-camera mode uses a fixed id `"icsee"`; frontend uses the
   same id so status/recordings keys line up.
+
+## Automation (detect -> device action) — `nvr/automation.ts`
+Rules ("if camera X detects label Y -> WiZ on/off or TV action") persist to
+`config/automation-rules.json`; `onDetection()` is called from the detector and must NOT be
+awaited (don't block the analysis loop). Hard constraints learned in review:
+- Device control NEVER uses `exec` with interpolated config (tvIp etc.) — shell injection.
+  Use `execFile("adb", [...args])` with arrays, and validate `tvIp` as strict IPv4[:port]
+  before use. WiZ is dgram UDP setPilot (no shell).
+- Only allow-listed commands run (wiz: on/off; tv: power/youtube/mute/home); reject the rest
+  in `saveRules` validation, clamp `cooldownSec` (0..3600), cap rule count.
+- Rule file writes are atomic (tmp + fsync + rename); on a corrupt file, KEEP last-known-good,
+  do not silently reset to `[]` (would wipe all automations on one bad parse).
