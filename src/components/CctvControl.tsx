@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download, Zap, Plus, Lightbulb, Tv, PlayCircle, Send, Clock } from 'lucide-react';
+import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, VideoOff, Trash2, Play, X, ScanEye, Download, Zap, Plus, Lightbulb, Tv, PlayCircle, Send, Clock, Volume2, VolumeX } from 'lucide-react';
 import type { CctvConfig, NvrRecording, NvrDetection, AutomationRule, NvrDevices, TelegramSnapSchedule } from '../types';
 
 const DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
@@ -211,6 +211,9 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [ptzMessage, setPtzMessage] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState(false);
+  const [audioOn, setAudioOn] = useState(false);
+  const [audioKey, setAudioKey] = useState<number>(Date.now());
 
   // NVR state
   const [recording, setRecording] = useState(false);
@@ -289,6 +292,8 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
 
   useEffect(() => {
     if (activeIp) setRefreshKey(Date.now());
+    setStreamError(false);
+    setAudioOn(false);
   }, [selectedCctv, icseeIp]);
 
   const loadAutomation = useCallback(async () => {
@@ -415,8 +420,14 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
 
   const handleRefresh = () => {
     setLoading(true);
+    setStreamError(false);
     setRefreshKey(Date.now());
     setTimeout(() => setLoading(false), 800);
+  };
+
+  const toggleAudio = () => {
+    if (!audioOn) setAudioKey(Date.now());
+    setAudioOn(v => !v);
   };
 
   const handleTestConnection = async () => {
@@ -558,14 +569,22 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
             </>
           ) : (
             <>
-              <img
-                src={`/api/icsee/snapshot?ip=${activeIp}&t=${refreshKey}`}
-                alt="ICSee Live Feed"
-                className="w-full h-full object-cover opacity-90"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=800&q=80';
-                }}
-              />
+              {streamError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-6">
+                  <VideoOff size={28} className="text-zinc-600" />
+                  <p className="text-xs font-extrabold text-zinc-300">Tidak ada sinyal</p>
+                  <p className="text-[10px] text-zinc-500 font-mono leading-relaxed max-w-xs">Pastikan kamera menyala, terhubung ke WiFi/jaringan yang sama, serta IP & RTSP sudah benar.</p>
+                  <button onClick={handleRefresh} className="mt-1 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-lg text-[10px] font-bold hover:bg-zinc-800 cursor-pointer">Coba Lagi</button>
+                </div>
+              ) : (
+                <img
+                  key={refreshKey}
+                  src={`/api/icsee/stream?ip=${activeIp}&t=${refreshKey}`}
+                  alt="CCTV Live Feed"
+                  className="w-full h-full object-cover"
+                  onError={() => setStreamError(true)}
+                />
+              )}
               {recording && (
                 <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-md text-[9px] font-mono tracking-wider font-extrabold text-rose-400 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
@@ -580,7 +599,7 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
               <div className={`absolute top-3 right-3 border px-2.5 py-1 rounded-md text-[9px] font-bold ${
                 testResult?.online ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-zinc-900/90 border-zinc-800/80 text-zinc-400'
               }`}>
-                {testResult?.online ? 'REAL CAMERA (ONLINE)' : 'SNAPSHOT'}
+                {testResult?.online ? 'REAL CAMERA (ONLINE)' : 'LIVE'}
               </div>
               <div className="absolute bottom-3 left-3 bg-black/60 px-2.5 py-1 rounded text-[10px] text-zinc-300 font-mono tracking-wide">
                 Cam: {selectedCctv?.name || icseeName || 'Pintu Depan'}
@@ -623,7 +642,17 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
               } ${nvrBusy ? 'opacity-60' : ''}`}
             >
               <Cpu size={12} className={nvrBusy ? 'animate-spin' : ''} />
-              {detecting ? 'AI Stop' : 'AI Scan'}
+              {detecting ? 'Sensor: AKTIF' : 'Sensor Gerakan'}
+            </button>
+
+            <button
+              onClick={toggleAudio}
+              className={`px-3 py-1.5 border font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
+                audioOn ? 'bg-sky-500/15 border-sky-500/40 text-sky-400' : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
+              }`}
+            >
+              {audioOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
+              {audioOn ? 'Bisukan' : 'Dengar'}
             </button>
 
             <button
@@ -638,6 +667,23 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
             </button>
           </div>
         </div>
+
+        {audioOn && (
+          <audio
+            key={audioKey}
+            src={`/api/icsee/audio?ip=${activeIp}&t=${audioKey}`}
+            autoPlay
+            onError={() => {
+              setAudioOn(false);
+              setNvrMessage('Audio tidak tersedia dari kamera ini.');
+              setTimeout(() => setNvrMessage(null), 5000);
+            }}
+          />
+        )}
+
+        <p className="text-[10px] text-zinc-600 font-mono leading-relaxed">
+          "Dengar" memutar suara dari mikrofon CCTV (satu arah). Bicara balik ke kamera (2 arah) belum didukung lewat browser — gunakan aplikasi iCSee untuk talk-back. "Sensor Gerakan" tetap aktif walau aplikasi di-restart.
+        </p>
 
         {nvrMessage && (
           <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-center text-[10px] font-mono text-[#F97316]">

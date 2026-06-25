@@ -4,10 +4,12 @@ import fs from "fs";
 import net from "net";
 import dgram from "dgram";
 import crypto from "crypto";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import onvif from "onvif";
 import { registerNvr } from "./nvr/index";
+import { grabFrame } from "./nvr/detector";
+import { resolveStreamUrl } from "./nvr/onvif";
 
 const { Cam } = onvif;
 
@@ -629,10 +631,15 @@ async function startServer() {
 
   app.get("/api/icsee/snapshot", async (req, res) => {
     const targetIp = (req.query.ip as string) || deviceConfig.icseeIp;
-    const username = (req.query.username as string) || "admin";
-    const password = (req.query.password as string) || "";
-    
-    console.log(`[ICSee] Mengambil snapshot dari ${targetIp}`);
+
+    // Only snapshot configured cameras (prevents arbitrary internal host probing)
+    const allowedIps = new Set<string>([
+      deviceConfig.icseeIp,
+      ...((deviceConfig.cctvs || []).map((c: any) => c.ip)),
+    ].filter(Boolean));
+    if (!allowedIps.has(targetIp)) {
+      return res.status(403).json({ success: false, message: `Kamera ${targetIp} tidak terdaftar di konfigurasi.` });
+    }
 
     const wantsJson = req.query.json === "true" || req.headers.accept?.includes("application/json");
     if (wantsJson) {
@@ -643,8 +650,30 @@ async function startServer() {
       });
       return;
     }
-    
-    // Quick scan port 80 to prevent hanging the fetch request
+
+    console.log(`[ICSee] Mengambil snapshot dari ${targetIp}`);
+
+    const camConfig = (deviceConfig.cctvs || []).find((c: any) => c.ip === targetIp);
+    const baseRtsp = camConfig?.rtspUrl || deviceConfig.icseeRtspUrl;
+    const { username, password } = parseRtspCreds(baseRtsp);
+
+    // Primary: grab a real frame straight from the camera's RTSP stream (via ffmpeg).
+    // The stream URL is auto-resolved over ONVIF so we use the camera's actual path,
+    // not a guessed one — this is what makes the live image appear.
+    try {
+      const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp });
+      const frame = await grabFrame(rtsp);
+      if (frame) {
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-CCTV-Source", "real-camera");
+        return res.send(frame);
+      }
+    } catch (err) {
+      console.error("[ICSee] Snapshot RTSP gagal:", err);
+    }
+
+    // Secondary: some cameras expose an HTTP snapshot CGI on port 80.
     const isPort80Open = await checkTcpPort(80, targetIp, 800);
     if (isPort80Open) {
       const urlsToTry = [
@@ -652,31 +681,122 @@ async function startServer() {
         `http://${targetIp}/cgi-bin/snapshot.cgi?user=${username}&pwd=${password}`,
         `http://${targetIp}/snapshot.jpg`
       ];
-      
+
       for (const url of urlsToTry) {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 1000);
-          
+
           const response = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
-          
+
           if (response.ok) {
             const arrayBuffer = await response.arrayBuffer();
             res.setHeader("Content-Type", "image/jpeg");
             res.setHeader("Cache-Control", "no-cache");
             res.setHeader("X-CCTV-Source", "real-camera");
-            res.send(Buffer.from(arrayBuffer));
-            return;
+            return res.send(Buffer.from(arrayBuffer));
           }
         } catch (err) {
           // Silently skip and try next
         }
       }
     }
-    
-    // Fallback: Redirect to high-quality smart home backyard mockup image
-    res.redirect("https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=800&q=80");
+
+    // No fake fallback image: report honestly so the UI can show "Tidak ada sinyal".
+    return res.status(502).json({
+      success: false,
+      message: "Tidak ada sinyal dari kamera. Periksa RTSP, kredensial, dan jaringan.",
+    });
+  });
+
+  // Live MJPEG stream (real-time video for an <img> tag). One ffmpeg per viewer,
+  // killed the moment the client disconnects. Uses the ONVIF-resolved RTSP URL.
+  app.get("/api/icsee/stream", async (req, res) => {
+    const targetIp = (req.query.ip as string) || deviceConfig.icseeIp;
+    const allowedIps = new Set<string>([
+      deviceConfig.icseeIp,
+      ...((deviceConfig.cctvs || []).map((c: any) => c.ip)),
+    ].filter(Boolean));
+    if (!allowedIps.has(targetIp)) {
+      return res.status(403).json({ success: false, message: `Kamera ${targetIp} tidak terdaftar di konfigurasi.` });
+    }
+
+    const camConfig = (deviceConfig.cctvs || []).find((c: any) => c.ip === targetIp);
+    const baseRtsp = camConfig?.rtspUrl || deviceConfig.icseeRtspUrl;
+    const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp });
+
+    console.log(`[ICSee Stream] Live MJPEG dari ${targetIp}`);
+    res.setHeader("Content-Type", "multipart/x-mixed-replace; boundary=ffmpeg");
+    res.setHeader("Cache-Control", "no-cache, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Connection", "close");
+
+    const proc = spawn("ffmpeg", [
+      "-hide_banner", "-loglevel", "error",
+      "-rtsp_transport", "tcp",
+      "-i", rtsp,
+      "-an",
+      "-f", "mpjpeg",
+      "-q:v", "6",
+      "-r", "10",
+      "-vf", "scale='min(960,iw)':-2",
+      "pipe:1",
+    ]);
+
+    proc.stdout.pipe(res);
+    let firstErr = "";
+    proc.stderr.on("data", (d) => {
+      if (!firstErr) { firstErr = String(d).split("\n")[0]; console.error(`[ICSee Stream] ${targetIp}: ${firstErr}`); }
+    });
+    const kill = () => { try { proc.kill("SIGKILL"); } catch { /* noop */ } };
+    proc.on("error", () => { try { if (!res.headersSent) res.status(502); res.end(); } catch { /* noop */ } });
+    proc.on("close", () => { try { res.end(); } catch { /* noop */ } });
+    req.on("close", kill);
+    res.on("close", kill);
+  });
+
+  // One-way live audio: LISTEN to the camera mic as an MP3 stream for an <audio> tag.
+  // Two-way talk-back is intentionally NOT implemented: Xiongmai/iCSee uses a
+  // proprietary audio backchannel that browsers cannot drive (use the iCSee app for that).
+  app.get("/api/icsee/audio", async (req, res) => {
+    const targetIp = (req.query.ip as string) || deviceConfig.icseeIp;
+    const allowedIps = new Set<string>([
+      deviceConfig.icseeIp,
+      ...((deviceConfig.cctvs || []).map((c: any) => c.ip)),
+    ].filter(Boolean));
+    if (!allowedIps.has(targetIp)) {
+      return res.status(403).json({ success: false, message: `Kamera ${targetIp} tidak terdaftar di konfigurasi.` });
+    }
+
+    const camConfig = (deviceConfig.cctvs || []).find((c: any) => c.ip === targetIp);
+    const baseRtsp = camConfig?.rtspUrl || deviceConfig.icseeRtspUrl;
+    const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp });
+
+    console.log(`[ICSee Audio] Live audio dari ${targetIp}`);
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-cache, private");
+    res.setHeader("Connection", "close");
+
+    const proc = spawn("ffmpeg", [
+      "-hide_banner", "-loglevel", "error",
+      "-rtsp_transport", "tcp",
+      "-i", rtsp,
+      "-vn",
+      "-acodec", "libmp3lame", "-b:a", "64k", "-ac", "1", "-ar", "22050",
+      "-f", "mp3", "pipe:1",
+    ]);
+
+    proc.stdout.pipe(res);
+    let firstErr = "";
+    proc.stderr.on("data", (d) => {
+      if (!firstErr) { firstErr = String(d).split("\n")[0]; console.error(`[ICSee Audio] ${targetIp}: ${firstErr}`); }
+    });
+    const kill = () => { try { proc.kill("SIGKILL"); } catch { /* noop */ } };
+    proc.on("error", () => { try { if (!res.headersSent) res.status(502); res.end(); } catch { /* noop */ } });
+    proc.on("close", () => { try { res.end(); } catch { /* noop */ } });
+    req.on("close", kill);
+    res.on("close", kill);
   });
 
   // 3. Android TV Controls (Real ADB TCP/IP Command Execution if installed)

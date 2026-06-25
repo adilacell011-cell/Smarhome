@@ -1,8 +1,10 @@
 import fs from "fs";
+import path from "path";
 import type { Express, Request, Response } from "express";
 import {
   initStore, persist, listRecordings, getRecording, deleteRecording, listDetections,
 } from "./store";
+import { resolveStreamUrl } from "./onvif";
 import {
   startRecording, stopRecording, recordingStatus, stopAllRecordings, type Camera,
 } from "./recorder";
@@ -24,20 +26,50 @@ type GetConfig = () => any;
 // Resolve a camera by id from the live config; never trust client-supplied RTSP URLs.
 // The client-supplied cameraId is only used to MATCH a configured camera — never to
 // fabricate a new one — otherwise arbitrary ids could spawn unbounded ffmpeg sessions.
-function resolveCamera(getConfig: GetConfig, cameraId: string): Camera | null {
+async function resolveCamera(getConfig: GetConfig, cameraId: string): Promise<Camera | null> {
   const cfg = getConfig();
   const cctvs = cfg.cctvs || [];
+  let base: Camera | null = null;
   if (cctvs.length > 0) {
     const found = cctvs.find((c: any) => c.id === cameraId);
     if (!found) return null; // unknown id with a multi-camera config -> reject
-    return { id: found.id, name: found.name, ip: found.ip, rtspUrl: found.rtspUrl };
-  }
-  // No multi-camera config: a single legacy iCSee camera with a fixed, trusted id.
-  if (cfg.icseeIp) {
+    base = { id: found.id, name: found.name, ip: found.ip, rtspUrl: found.rtspUrl };
+  } else if (cfg.icseeIp) {
+    // No multi-camera config: a single legacy iCSee camera with a fixed, trusted id.
     const rtspUrl = cfg.icseeRtspUrl || `rtsp://${cfg.icseeIp}:554/stream1?channel=1&subtype=0`;
-    return { id: "icsee", name: cfg.icseeName || "CCTV", ip: cfg.icseeIp, rtspUrl };
+    base = { id: "icsee", name: cfg.icseeName || "CCTV", ip: cfg.icseeIp, rtspUrl };
   }
-  return null;
+  if (!base) return null;
+
+  // Ask the camera (via ONVIF, the same path PTZ uses) for its real RTSP stream URL,
+  // instead of trusting the guessed /stream1 path. Falls back to the configured URL.
+  const rtspUrl = await resolveStreamUrl({ ip: base.ip, rtspUrl: base.rtspUrl });
+  return { ...base, rtspUrl };
+}
+
+// ---- Motion sensor (AI detection) on/off persistence ----
+// Remembers which cameras the user left "Sensor Gerakan" enabled on, so detection
+// auto-resumes after a server/container restart instead of silently turning off.
+const MOTION_FILE = path.join(process.cwd(), "config", "motion-sensor.json");
+
+function loadMotionSet(): Set<string> {
+  try {
+    const arr = JSON.parse(fs.readFileSync(MOTION_FILE, "utf-8"));
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+  } catch { return new Set(); }
+}
+
+function saveMotionSet(set: Set<string>) {
+  try {
+    fs.mkdirSync(path.dirname(MOTION_FILE), { recursive: true });
+    fs.writeFileSync(MOTION_FILE, JSON.stringify([...set]), "utf-8");
+  } catch (err) { console.error("[NVR] Gagal menyimpan status sensor gerakan:", err); }
+}
+
+function rememberMotion(cameraId: string, on: boolean) {
+  const set = loadMotionSet();
+  if (on) set.add(cameraId); else set.delete(cameraId);
+  saveMotionSet(set);
 }
 
 export async function registerNvr(app: Express, getConfig: GetConfig) {
@@ -63,7 +95,7 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
   });
 
   app.post("/api/nvr/record/start", async (req: Request, res: Response) => {
-    const camera = resolveCamera(getConfig, req.body?.cameraId);
+    const camera = await resolveCamera(getConfig, req.body?.cameraId);
     if (!camera) return res.status(404).json({ success: false, message: "Kamera tidak ditemukan di konfigurasi." });
     const result = await startRecording(camera);
     res.status(result.ok ? 200 : 502).json({ success: result.ok, message: result.message });
@@ -75,14 +107,17 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
   });
 
   app.post("/api/nvr/detect/start", async (req: Request, res: Response) => {
-    const camera = resolveCamera(getConfig, req.body?.cameraId);
+    const camera = await resolveCamera(getConfig, req.body?.cameraId);
     if (!camera) return res.status(404).json({ success: false, message: "Kamera tidak ditemukan di konfigurasi." });
     const result = await startDetection(camera);
+    if (result.ok) rememberMotion(camera.id, true);
     res.status(result.ok ? 200 : 502).json({ success: result.ok, message: result.message });
   });
 
   app.post("/api/nvr/detect/stop", (req: Request, res: Response) => {
-    const result = stopDetection(req.body?.cameraId);
+    const cameraId = req.body?.cameraId;
+    const result = stopDetection(cameraId);
+    if (typeof cameraId === "string") rememberMotion(cameraId, false);
     res.json({ success: result.ok, message: result.message });
   });
 
@@ -234,6 +269,24 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
     res.setHeader("Cache-Control", "public, max-age=3600");
     fs.createReadStream(row.thumb).pipe(res);
   });
+
+  // Auto-resume motion sensor (AI detection) for cameras the user left enabled.
+  // Delayed so the network/cameras have a moment to come up after a restart.
+  setTimeout(async () => {
+    const enabled = loadMotionSet();
+    if (enabled.size === 0) return;
+    console.log(`[NVR] Memulihkan sensor gerakan untuk ${enabled.size} kamera...`);
+    for (const id of enabled) {
+      try {
+        const cam = await resolveCamera(getConfig, id);
+        if (!cam) { rememberMotion(id, false); continue; }
+        const r = await startDetection(cam);
+        console.log(`[NVR] Sensor gerakan ${id}: ${r.message}`);
+      } catch (err: any) {
+        console.error(`[NVR] Gagal memulihkan sensor gerakan ${id}:`, err?.message || err);
+      }
+    }
+  }, 5000);
 
   console.log("[NVR] Modul rekaman & AI deteksi aktif");
 }
