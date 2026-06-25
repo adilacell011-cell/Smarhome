@@ -93,6 +93,11 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
     const stat = fs.statSync(rec.file);
     const range = req.headers.range;
     res.setHeader("Content-Type", "video/mp4");
+    if (req.query.download) {
+      const safeName = `${rec.camera_name || "cctv"}_${new Date(rec.start_ts).toISOString().replace(/[:.]/g, "-")}.mp4`
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+    }
     if (range) {
       const m = /bytes=(\d+)-(\d*)/.exec(range);
       const start = m ? parseInt(m[1]) : 0;

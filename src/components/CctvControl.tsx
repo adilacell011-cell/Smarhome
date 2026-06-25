@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye } from 'lucide-react';
+import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download } from 'lucide-react';
 import type { CctvConfig, NvrRecording, NvrDetection } from '../types';
 
 interface CctvControlProps {
@@ -439,6 +439,14 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
                     <p className="text-xs font-bold text-white truncate">{fmtTime(r.start_ts)}</p>
                     <p className="text-[10px] text-zinc-500 font-mono">{fmtDur(r.duration)} • {fmtSize(r.size)}</p>
                   </div>
+                  <a
+                    href={`/api/nvr/recordings/${r.id}/video?download=1`}
+                    download
+                    className="p-2 text-zinc-500 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-all shrink-0"
+                    title="Unduh rekaman"
+                  >
+                    <Download size={14} />
+                  </a>
                   <button onClick={() => deleteRecording(r.id)} className="p-2 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all shrink-0" title="Hapus rekaman">
                     <Trash2 size={14} />
                   </button>
