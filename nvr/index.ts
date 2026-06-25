@@ -41,10 +41,12 @@ async function resolveCamera(getConfig: GetConfig, cameraId: string): Promise<Ca
   }
   if (!base) return null;
 
-  // Ask the camera (via ONVIF, the same path PTZ uses) for its real RTSP stream URL,
-  // instead of trusting the guessed /stream1 path. Falls back to the configured URL.
+  // Ask the camera (via ONVIF, the same path PTZ uses) for its real RTSP stream URLs.
+  // High-res for recording; low-res substream for live view + AI to save CPU.
+  // The second call reuses the cached ONVIF discovery, so it's cheap.
   const rtspUrl = await resolveStreamUrl({ ip: base.ip, rtspUrl: base.rtspUrl });
-  return { ...base, rtspUrl };
+  const rtspUrlLow = await resolveStreamUrl({ ip: base.ip, rtspUrl: base.rtspUrl }, { preferLowRes: true });
+  return { ...base, rtspUrl, rtspUrlLow };
 }
 
 // ---- Motion sensor (AI detection) on/off persistence ----

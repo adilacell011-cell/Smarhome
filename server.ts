@@ -661,7 +661,7 @@ async function startServer() {
     // The stream URL is auto-resolved over ONVIF so we use the camera's actual path,
     // not a guessed one — this is what makes the live image appear.
     try {
-      const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp });
+      const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp }, { preferLowRes: true });
       const frame = await grabFrame(rtsp);
       if (frame) {
         res.setHeader("Content-Type", "image/jpeg");
@@ -724,7 +724,8 @@ async function startServer() {
 
     const camConfig = (deviceConfig.cctvs || []).find((c: any) => c.ip === targetIp);
     const baseRtsp = camConfig?.rtspUrl || deviceConfig.icseeRtspUrl;
-    const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp });
+    // Live view uses the low-res substream — far lighter on CPU than the main HD stream.
+    const rtsp = await resolveStreamUrl({ ip: targetIp, rtspUrl: baseRtsp }, { preferLowRes: true });
 
     console.log(`[ICSee Stream] Live MJPEG dari ${targetIp}`);
     res.setHeader("Content-Type", "multipart/x-mixed-replace; boundary=ffmpeg");
@@ -738,9 +739,9 @@ async function startServer() {
       "-i", rtsp,
       "-an",
       "-f", "mpjpeg",
-      "-q:v", "6",
-      "-r", "10",
-      "-vf", "scale='min(960,iw)':-2",
+      "-q:v", "7",
+      "-r", "6",
+      "-vf", "scale='min(640,iw)':-2",
       "pipe:1",
     ]);
 

@@ -41,7 +41,7 @@ function pickUri(obj: any): string | undefined {
   return typeof candidate === "string" && candidate ? candidate : undefined;
 }
 
-type MediaUris = { streamUri?: string; snapshotUri?: string };
+type MediaUris = { streamUri?: string; streamUriLow?: string; snapshotUri?: string };
 
 // Cache discovery so we don't pay the ONVIF round-trip (or its timeout) on every frame.
 const cache = new Map<string, { uris: MediaUris; ts: number; ok: boolean }>();
@@ -52,29 +52,67 @@ function discover(ip: string, port: number, username: string, password: string):
   return new Promise((resolve) => {
     let settled = false;
     const done = (u: MediaUris) => { if (!settled) { settled = true; resolve(u); } };
-    const timeout = setTimeout(() => done({}), 6000);
+    const timeout = setTimeout(() => done({}), 8000);
 
     try {
-      const cam: any = new Cam(
+      new Cam(
         { hostname: ip, username, password, port, timeout: 4000 },
         function (this: any, err: any) {
           if (err) { clearTimeout(timeout); return done({}); }
           const self = this;
-          self.getStreamUri({ protocol: "RTSP" }, (sErr: any, stream: any) => {
-            const rawStream = sErr ? undefined : pickUri(stream);
-            const streamUri = rawStream ? injectCreds(rawStream, username, password) : undefined;
+          // Promisified ONVIF call helper.
+          const call = (fn: string, arg?: any): Promise<any> =>
+            new Promise((res) => {
+              try {
+                if (arg === undefined) self[fn]((e: any, d: any) => res(e ? null : d));
+                else self[fn](arg, (e: any, d: any) => res(e ? null : d));
+              } catch { res(null); }
+            });
+
+          (async () => {
             try {
-              self.getSnapshotUri({}, (snErr: any, snap: any) => {
-                clearTimeout(timeout);
-                const rawSnap = snErr ? undefined : pickUri(snap);
-                const snapshotUri = rawSnap ? injectCreds(rawSnap, username, password) : undefined;
-                done({ streamUri, snapshotUri });
-              });
+              // Profiles are usually populated during connect; fetch only if missing.
+              let list: any[] = Array.isArray(self.profiles) ? self.profiles : [];
+              if (!list.length) {
+                const p = await call("getProfiles");
+                list = Array.isArray(p) ? p : [];
+              }
+              // Rank profiles by pixel count: smallest = substream, largest = main stream.
+              const ranked = list
+                .map((p: any) => ({
+                  token: p?.$?.token,
+                  px: (p?.videoEncoderConfiguration?.resolution?.width || 0) *
+                      (p?.videoEncoderConfiguration?.resolution?.height || 0),
+                }))
+                .filter((p) => p.token);
+              ranked.sort((a, b) => a.px - b.px);
+              const lowToken = ranked.length ? ranked[0].token : undefined;
+              const highToken = ranked.length ? ranked[ranked.length - 1].token : undefined;
+
+              // Main (high-res) stream — used for recording.
+              const high = await call("getStreamUri", { protocol: "RTSP", ...(highToken ? { profileToken: highToken } : {}) });
+              const rawHigh = pickUri(high);
+              const streamUri = rawHigh ? injectCreds(rawHigh, username, password) : undefined;
+
+              // Sub (low-res) stream — used for live view + AI (much lighter on CPU).
+              let streamUriLow = streamUri;
+              if (lowToken && lowToken !== highToken) {
+                const low = await call("getStreamUri", { protocol: "RTSP", profileToken: lowToken });
+                const rawLow = pickUri(low);
+                if (rawLow) streamUriLow = injectCreds(rawLow, username, password);
+              }
+
+              const snap = await call("getSnapshotUri", lowToken ? { profileToken: lowToken } : {});
+              const rawSnap = pickUri(snap);
+              const snapshotUri = rawSnap ? injectCreds(rawSnap, username, password) : undefined;
+
+              clearTimeout(timeout);
+              done({ streamUri, streamUriLow, snapshotUri });
             } catch {
               clearTimeout(timeout);
-              done({ streamUri });
+              done({});
             }
-          });
+          })();
         }
       );
     } catch {
@@ -96,16 +134,20 @@ async function getUris(ip: string, port: number, username: string, password: str
 
 // Best RTSP URL for a camera: ONVIF-discovered stream URI (preferred), else the configured URL.
 // This is the key fix: the camera reports its real RTSP path instead of us guessing /stream1.
-export async function resolveStreamUrl(cam: { ip: string; rtspUrl?: string; onvifPort?: number }): Promise<string> {
+export async function resolveStreamUrl(
+  cam: { ip: string; rtspUrl?: string; onvifPort?: number },
+  opts?: { preferLowRes?: boolean }
+): Promise<string> {
   const fallback = cam.rtspUrl || `rtsp://${cam.ip}:554/stream1?channel=1&subtype=0`;
   if (!cam.ip) return fallback;
   const { username, password } = parseRtspCreds(cam.rtspUrl);
   const port = cam.onvifPort || 8899;
   try {
-    const { streamUri } = await getUris(cam.ip, port, username, password);
-    if (streamUri) {
-      console.log(`[ONVIF] ${cam.ip}: stream RTSP ditemukan ${maskUrl(streamUri)}`);
-      return streamUri;
+    const { streamUri, streamUriLow } = await getUris(cam.ip, port, username, password);
+    const chosen = opts?.preferLowRes ? (streamUriLow || streamUri) : (streamUri || streamUriLow);
+    if (chosen) {
+      console.log(`[ONVIF] ${cam.ip}: stream ${opts?.preferLowRes ? "sub (hemat CPU)" : "utama"} ${maskUrl(chosen)}`);
+      return chosen;
     }
     console.warn(`[ONVIF] ${cam.ip}: ONVIF gagal, pakai RTSP konfigurasi ${maskUrl(fallback)}`);
     return fallback;

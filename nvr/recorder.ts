@@ -3,7 +3,7 @@ import fs from "fs";
 import { spawn, ChildProcess } from "child_process";
 import { REC_DIR, THUMB_DIR, addRecording } from "./store";
 
-export type Camera = { id: string; name: string; ip: string; rtspUrl: string };
+export type Camera = { id: string; name: string; ip: string; rtspUrl: string; rtspUrlLow?: string };
 
 const SEGMENT_SECONDS = 120; // length of each recorded clip
 

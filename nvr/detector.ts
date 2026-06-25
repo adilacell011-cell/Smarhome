@@ -5,7 +5,7 @@ import { THUMB_DIR, addDetection } from "./store";
 import { onDetection } from "./automation";
 import type { Camera } from "./recorder";
 
-const INTERVAL_MS = 3000; // how often a frame is analysed
+const INTERVAL_MS = 5000; // how often a frame is analysed (higher = lighter CPU)
 const SCORE_THRESHOLD = 0.55;
 const COOLDOWN_MS = 20000; // per camera+label, avoid logging the same thing repeatedly
 const RELEVANT = new Set([
@@ -63,7 +63,7 @@ async function analyseOnce(state: DetState) {
   if (state.busy || !state.active) return;
   state.busy = true;
   try {
-    const frame = await grabFrame(state.camera.rtspUrl);
+    const frame = await grabFrame(state.camera.rtspUrlLow || state.camera.rtspUrl);
     if (!frame || !state.active) return;
 
     const jpeg = await import("jpeg-js");
@@ -123,7 +123,7 @@ export async function startDetection(camera: Camera): Promise<{ ok: boolean; mes
   }
 
   // Confirm the camera produces a frame before committing to the loop.
-  const frame = await grabFrame(camera.rtspUrl);
+  const frame = await grabFrame(camera.rtspUrlLow || camera.rtspUrl);
   if (!frame) {
     return { ok: false, message: `Tidak bisa mengambil gambar dari kamera ${camera.name} (${camera.ip}). Pastikan RTSP benar dan kamera di jaringan yang sama.` };
   }
