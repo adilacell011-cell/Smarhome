@@ -51,6 +51,19 @@ awaited (don't block the analysis loop). Hard constraints learned in review:
   ANY item is invalid. Never persist a filtered subset — a single malformed entry would silently
   delete all the user's saved rules/schedules.
 
+## Docker deploy (Dockge on home LAN server) — `Dockerfile` / `docker-compose.yml`
+Deployed to the user's own LAN server via Dockge, not Replit. Non-obvious constraints that bite if forgotten:
+- Runtime image MUST install system `ffmpeg` + `adb` (app spawns them for CCTV record/frames and
+  Android TV). Base `node:22-bookworm-slim`; both pkgs exist on bookworm.
+- Runtime needs node_modules (`npm ci --omit=dev` is enough): server.ts imports `vite` at top level,
+  and sql.js + tfjs-wasm assets are resolved from `node_modules` on disk at runtime.
+- `network_mode: host` so the container reaches LAN devices (WiZ UDP, ONVIF, ADB). App listens on
+  PORT||5000; with host mode `ports:` is ignored. Bridge mode works for unicast control but loses discovery.
+- Persist `./config` (login + device settings, incl. gitignored device-config.json) and `./data`
+  (recordings/thumbs/db) as volumes, or the user loses everything on container recreate.
+- Image published multi-arch (amd64+arm64) to GHCR via GitHub Actions — target is likely arm64 (Armbian SBC).
+  No native node addons (deliberate, see above) so QEMU multi-arch build is cheap.
+
 ## App login gate — `server.ts`
 The whole dashboard is behind a mandatory login. Credentials live in dashboard config
 (`config/device-config.json`) like every other setting — username plaintext (`appUsername`),

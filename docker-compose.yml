@@ -1,8 +1,38 @@
 services:
-  smart-home:
-    build: .
-    ports:
-      - "3000:3000"
+  adilanet-dashboard:
+    # ---------------------------------------------------------------
+    # OPSI A (disarankan): tarik image yang sudah Anda build di GitHub
+    # (GitHub Actions -> GHCR). Ganti USERNAME/REPO dengan repo GitHub
+    # Anda (huruf kecil semua). Contoh: ghcr.io/budi/adilanet:latest
+    # ---------------------------------------------------------------
+    image: ghcr.io/USERNAME/REPO:latest
+
+    # ---------------------------------------------------------------
+    # OPSI B: build langsung dari repo GitHub (tanpa GHCR).
+    # Matikan baris "image:" di atas, lalu aktifkan blok di bawah.
+    # ---------------------------------------------------------------
+    # build:
+    #   context: https://github.com/USERNAME/REPO.git#main
+
+    container_name: adilanet-dashboard
+    restart: unless-stopped
+    init: true
+
+    # Mode jaringan host: agar container bisa menjangkau perangkat LAN
+    # secara langsung (lampu WiZ via UDP, CCTV/ONVIF, Android TV via ADB).
+    # Aplikasi berjalan di port 5000 -> akses: http://IP-SERVER-ANDA:5000
+    network_mode: host
+
+    environment:
+      - PORT=5000
+      # - GEMINI_API_KEY=isi_kalau_pakai_fitur_AI
+
     volumes:
-      - ./config:/app/config
-    restart: always
+      - ./config:/app/config   # akun login + setelan perangkat (WAJIB disimpan)
+      - ./data:/app/data       # rekaman CCTV, thumbnail, database lokal
+
+    # Catatan: dengan network_mode host, pemetaan "ports:" diabaikan.
+    # Jika server Anda TIDAK mendukung host networking, hapus baris
+    # "network_mode: host" di atas dan pakai pemetaan port berikut:
+    # ports:
+    #   - "5000:5000"

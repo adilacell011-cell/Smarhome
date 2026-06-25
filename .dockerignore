@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+config/device-config.json
+.git
+.gitignore
+*.log
+.DS_Store
+.local
+.agents
+.cache
+.config
+attached_assets
