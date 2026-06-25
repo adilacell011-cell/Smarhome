@@ -38,7 +38,7 @@ async function ensureModel(): Promise<void> {
 }
 
 // Grab a single JPEG frame from the camera's RTSP stream.
-function grabFrame(rtspUrl: string): Promise<Buffer | null> {
+export function grabFrame(rtspUrl: string): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const proc = spawn("ffmpeg", [
       "-hide_banner", "-loglevel", "error",

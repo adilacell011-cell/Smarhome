@@ -13,6 +13,11 @@ import {
   initAutomation, listRules, saveRules, deleteRule, runAction, type AutomationRule,
   listSchedules, saveSchedules, deleteSchedule, type Schedule,
 } from "./automation";
+import {
+  initTelegram, isConfigured as tgConfigured, sendSnapshotNow,
+  listSchedules as listTgSchedules, saveSchedules as saveTgSchedules,
+  deleteSchedule as deleteTgSchedule, type SnapSchedule,
+} from "./telegram";
 
 type GetConfig = () => any;
 
@@ -38,6 +43,7 @@ function resolveCamera(getConfig: GetConfig, cameraId: string): Camera | null {
 export async function registerNvr(app: Express, getConfig: GetConfig) {
   await initStore();
   initAutomation(getConfig);
+  initTelegram(getConfig);
 
   const cleanup = () => {
     stopAllRecordings();
@@ -148,6 +154,36 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
   app.delete("/api/nvr/schedules/:id", (req: Request, res: Response) => {
     const ok = deleteSchedule(req.params.id);
     res.json({ success: ok, schedules: listSchedules() });
+  });
+
+  // ---- Telegram snapshots: send a camera photo to admin on a schedule (or on demand) ----
+
+  app.get("/api/nvr/telegram/status", (req: Request, res: Response) => {
+    res.json({ success: true, configured: tgConfigured() });
+  });
+
+  app.get("/api/nvr/telegram/schedules", (req: Request, res: Response) => {
+    res.json({ success: true, schedules: listTgSchedules() });
+  });
+
+  app.post("/api/nvr/telegram/schedules", (req: Request, res: Response) => {
+    const incoming = req.body?.schedules;
+    if (!Array.isArray(incoming)) return res.status(400).json({ success: false, message: "Format jadwal tidak valid" });
+    const saved = saveTgSchedules(incoming as SnapSchedule[]);
+    if (!saved) return res.status(400).json({ success: false, message: "Ada jadwal tidak valid (cek jam); tidak ada yang diubah" });
+    res.json({ success: true, schedules: saved });
+  });
+
+  app.delete("/api/nvr/telegram/schedules/:id", (req: Request, res: Response) => {
+    const ok = deleteTgSchedule(req.params.id);
+    res.json({ success: ok, schedules: listTgSchedules() });
+  });
+
+  // Capture and send a snapshot right now, so the user can verify the bot wiring.
+  app.post("/api/nvr/telegram/test", async (req: Request, res: Response) => {
+    const cameraId = typeof req.body?.cameraId === "string" ? req.body.cameraId : "all";
+    const result = await sendSnapshotNow(cameraId);
+    res.json({ success: result.ok, message: result.detail });
   });
 
   // Stream a recording with HTTP range support (for seeking in the player)

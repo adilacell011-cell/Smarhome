@@ -51,6 +51,18 @@ awaited (don't block the analysis loop). Hard constraints learned in review:
   ANY item is invalid. Never persist a filtered subset — a single malformed entry would silently
   delete all the user's saved rules/schedules.
 
+## Telegram snapshot bot — `nvr/telegram.ts`
+Scheduled camera snapshots auto-sent to an admin Telegram chat. Bot token + chat ID live in
+the DASHBOARD config (`config/device-config.json`, surfaced in SettingsPanel → Telegram tab),
+NOT env secrets — user explicitly wanted everything configurable in the UI. **Why:** non-tech
+user runs this on their own LAN server and edits all settings through the dashboard, not a shell.
+Mirrors the automation patterns: schedules persist to `config/telegram-schedules.json`, fail-closed
+full-set save, atomic write, 20s `setInterval` tick with minute-key dedupe, schedules sanitized on
+load (drop malformed). Sends via global `fetch`+`FormData`+`Blob` to the Bot API `sendPhoto` (no
+SDK). Reuses exported `grabFrame` from detector.ts. Has an in-flight `running` Set guard so a slow/
+unreachable camera can't pile up overlapping jobs. `cameraId` "all" expands to configured cameras
+only — never fabricate ids (same DoS rule as resolveCamera).
+
 ## Light scheduler (time-based) — same `nvr/automation.ts`
 Schedules ("turn lamp X on/off at HH:MM on chosen days") persist to `config/light-schedules.json`
 and reuse `runAction` (WiZ UDP). A single `setInterval(tickSchedules, 20000)` checks every 20s and

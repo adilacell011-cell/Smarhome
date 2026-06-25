@@ -60,7 +60,9 @@ const DEFAULT_CONFIG = {
   tvIp: '192.168.1.30',
   routerName: 'Fiberhome Router Gateway',
   routerIp: '192.168.1.1',
-  routerPassword: ''
+  routerPassword: '',
+  telegramBotToken: '',
+  telegramChatId: ''
 };
 
 function readConfig() {

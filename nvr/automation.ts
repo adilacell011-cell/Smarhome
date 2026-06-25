@@ -42,7 +42,7 @@ const schedLastFired = new Map<string, string>(); // scheduleId -> minute key
 let schedTimer: ReturnType<typeof setInterval> | null = null;
 
 // Atomic write: temp file + fsync + rename, so a crash mid-write cannot truncate the file.
-function atomicWriteJson(file: string, data: any) {
+export function atomicWriteJson(file: string, data: any) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   const fd = fs.openSync(tmp, "w");
@@ -56,7 +56,7 @@ function atomicWriteJson(file: string, data: any) {
 }
 
 // Returns the parsed array, or null if the file is missing/corrupt (caller keeps last-known-good).
-function loadJsonArray(file: string): any[] | null {
+export function loadJsonArray(file: string): any[] | null {
   try {
     if (!fs.existsSync(file)) return null;
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));

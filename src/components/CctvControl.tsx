@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download, Zap, Plus, Lightbulb, Tv, PlayCircle } from 'lucide-react';
-import type { CctvConfig, NvrRecording, NvrDetection, AutomationRule, NvrDevices } from '../types';
+import { RefreshCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Cpu, Copy, Check, Video, Trash2, Play, X, ScanEye, Download, Zap, Plus, Lightbulb, Tv, PlayCircle, Send, Clock } from 'lucide-react';
+import type { CctvConfig, NvrRecording, NvrDetection, AutomationRule, NvrDevices, TelegramSnapSchedule } from '../types';
+
+const DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
 interface CctvControlProps {
   icseeName?: string;
@@ -137,6 +139,72 @@ function RuleForm({ devices, onSave, onCancel }: {
   );
 }
 
+function SnapForm({ cameras, onSave, onCancel }: {
+  cameras: Array<{ id: string; name: string }>;
+  onSave: (s: TelegramSnapSchedule) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState<string>('');
+  const [time, setTime] = useState<string>('07:00');
+  const [cameraId, setCameraId] = useState<string>('all');
+  const [days, setDays] = useState<number[]>([]);
+
+  const toggleDay = (d: number) => setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+
+  const submit = () => {
+    const id = (globalThis.crypto?.randomUUID?.() || `snap_${Date.now()}`);
+    onSave({ id, name: name.trim() || undefined, enabled: true, time, days, cameraId });
+  };
+
+  const selClass = 'bg-[#1C1C1F] border border-zinc-800 text-xs font-bold text-zinc-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 w-full';
+
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3">
+      <p className="text-[10px] font-extrabold text-sky-400 uppercase tracking-widest">Jadwal Snapshot Baru</p>
+
+      <div>
+        <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Nama (opsional)</label>
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Contoh: Cek Pagi" className={selClass} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Jam Kirim</label>
+          <input type="time" value={time} onChange={e => setTime(e.target.value)} className={selClass} />
+        </div>
+        <div>
+          <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Kamera</label>
+          <select value={cameraId} onChange={e => setCameraId(e.target.value)} className={selClass}>
+            <option value="all">Semua Kamera</option>
+            {cameras.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1.5">Hari (kosong = setiap hari)</label>
+        <div className="flex flex-wrap gap-1.5">
+          {DAY_LABELS.map((lbl, d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => toggleDay(d)}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all ${days.includes(d) ? 'bg-sky-500/20 border border-sky-500/40 text-sky-300' : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button onClick={submit} className="flex-1 bg-sky-500/15 border border-sky-500/40 text-sky-400 font-extrabold text-[11px] uppercase tracking-wider py-2.5 rounded-xl hover:bg-sky-500/25 transition-all">Simpan Jadwal</button>
+        <button onClick={onCancel} className="px-4 bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold text-[11px] uppercase tracking-wider py-2.5 rounded-xl hover:bg-zinc-800 transition-all">Batal</button>
+      </div>
+    </div>
+  );
+}
+
 export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlProps) {
   const [selectedCctv, setSelectedCctv] = useState<CctvConfig | null>(null);
   const [refreshKey, setRefreshKey] = useState<number>(Date.now());
@@ -158,6 +226,13 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   const [devices, setDevices] = useState<NvrDevices>({ lamps: [], cameras: [], tv: null });
   const [showRuleForm, setShowRuleForm] = useState(false);
   const [autoMessage, setAutoMessage] = useState<string | null>(null);
+
+  // Telegram snapshot state
+  const [tgSchedules, setTgSchedules] = useState<TelegramSnapSchedule[]>([]);
+  const [tgConfigured, setTgConfigured] = useState(false);
+  const [showSnapForm, setShowSnapForm] = useState(false);
+  const [tgMessage, setTgMessage] = useState<string | null>(null);
+  const [tgTesting, setTgTesting] = useState(false);
 
   const [testingConn, setTestingConn] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -270,6 +345,72 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
       setAutoMessage('Gagal mengirim aksi');
     }
     setTimeout(() => setAutoMessage(null), 5000);
+  };
+
+  const loadTelegram = useCallback(async () => {
+    try {
+      const [statusRes, schedRes] = await Promise.all([
+        fetch('/api/nvr/telegram/status'),
+        fetch('/api/nvr/telegram/schedules'),
+      ]);
+      const status = await statusRes.json();
+      const sched = await schedRes.json();
+      if (status.success) setTgConfigured(!!status.configured);
+      if (sched.success) setTgSchedules(sched.schedules || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => { loadTelegram(); }, [loadTelegram]);
+
+  const persistSnap = async (next: TelegramSnapSchedule[]) => {
+    const prev = tgSchedules;
+    setTgSchedules(next);
+    try {
+      const res = await fetch('/api/nvr/telegram/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules: next }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setTgSchedules(prev);
+        setTgMessage(data.message || 'Gagal menyimpan jadwal');
+        setTimeout(() => setTgMessage(null), 5000);
+      }
+    } catch (err) {
+      console.error(err);
+      setTgSchedules(prev);
+    }
+  };
+
+  const toggleSnap = (id: string) => {
+    persistSnap(tgSchedules.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
+  };
+
+  const removeSnap = async (id: string) => {
+    setTgSchedules(tgSchedules.filter(s => s.id !== id));
+    try { await fetch(`/api/nvr/telegram/schedules/${id}`, { method: 'DELETE' }); } catch (err) { console.error(err); }
+  };
+
+  const testSnap = async () => {
+    setTgTesting(true);
+    setTgMessage('Mengambil & mengirim snapshot...');
+    try {
+      const res = await fetch('/api/nvr/telegram/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cameraId }),
+      });
+      const data = await res.json();
+      setTgMessage(data.message || (data.success ? 'Berhasil' : 'Gagal'));
+    } catch (err) {
+      console.error(err);
+      setTgMessage('Gagal mengirim snapshot');
+    }
+    setTgTesting(false);
+    setTimeout(() => setTgMessage(null), 6000);
   };
 
   const handleRefresh = () => {
@@ -686,6 +827,82 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
                           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${r.enabled ? 'left-4.5' : 'left-0.5'}`} style={{ left: r.enabled ? '18px' : '2px' }}></span>
                         </button>
                         <button onClick={() => removeRule(r.id)} className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all" title="Hapus aturan">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Telegram auto snapshots */}
+        <div className="border-t border-zinc-800/60 pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5"><Send size={13} className="text-sky-400" /> Snapshot Telegram</span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={testSnap} disabled={tgTesting || !tgConfigured} className="flex items-center gap-1 px-2.5 py-1.5 bg-sky-500/10 border border-sky-500/20 text-sky-400 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-sky-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <Send size={12} /> Tes Kirim
+              </button>
+              {!showSnapForm && (
+                <button onClick={() => setShowSnapForm(true)} className="flex items-center gap-1 px-2.5 py-1.5 bg-sky-500/10 border border-sky-500/20 text-sky-400 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-sky-500/20 transition-all">
+                  <Plus size={12} /> Jadwal
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-zinc-600 font-mono leading-relaxed">Foto kamera otomatis dikirim ke admin lewat bot Telegram sesuai jadwal. Atur token bot & Chat ID di menu Pengaturan → Telegram.</p>
+
+          {!tgConfigured && (
+            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] font-mono text-amber-400 leading-relaxed">
+              Bot Telegram belum diatur. Buka Pengaturan → Telegram untuk mengisi token bot dan Chat ID admin.
+            </div>
+          )}
+
+          {showSnapForm && (
+            <SnapForm
+              cameras={(cctvs && cctvs.length > 0) ? cctvs.map(c => ({ id: c.id, name: c.name })) : [{ id: 'icsee', name: icseeName || 'CCTV' }]}
+              onSave={(s) => { persistSnap([...tgSchedules, s]); setShowSnapForm(false); }}
+              onCancel={() => setShowSnapForm(false)}
+            />
+          )}
+
+          {tgMessage && (
+            <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-center text-[10px] font-mono text-sky-400">{tgMessage}</div>
+          )}
+
+          {tgSchedules.length === 0 && !showSnapForm ? (
+            <p className="text-[10px] text-zinc-600 font-mono py-1">Belum ada jadwal snapshot.</p>
+          ) : (
+            <div className="space-y-2">
+              {tgSchedules.map((s) => {
+                const camName = s.cameraId === 'all' ? 'Semua Kamera' : ((cctvs?.find(c => c.id === s.cameraId)?.name) || (s.cameraId === 'icsee' ? (icseeName || 'CCTV') : s.cameraId));
+                const dayText = s.days.length === 0 ? 'Setiap hari' : s.days.slice().sort((a, b) => a - b).map(d => DAY_LABELS[d]).join(', ');
+                return (
+                  <div key={s.id} className={`bg-zinc-900/40 p-3 rounded-xl border ${s.enabled ? 'border-sky-500/20' : 'border-zinc-800/60'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-zinc-300 leading-snug flex items-center gap-1.5">
+                          <Clock size={11} className="text-sky-400 shrink-0" />
+                          <b className="text-white">{s.time}</b>
+                          {s.name && <span className="text-zinc-500 truncate">• {s.name}</span>}
+                        </p>
+                        <p className="text-[11px] text-zinc-300 leading-snug mt-0.5">
+                          <span className="text-zinc-500">Kamera:</span> <b className="text-white">{camName}</b>
+                        </p>
+                        <p className="text-[9px] text-zinc-600 font-mono mt-1">{dayText}</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => toggleSnap(s.id)}
+                          className={`relative w-9 h-5 rounded-full transition-all ${s.enabled ? 'bg-sky-500' : 'bg-zinc-700'}`}
+                          title={s.enabled ? 'Nonaktifkan' : 'Aktifkan'}
+                        >
+                          <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: s.enabled ? '18px' : '2px' }}></span>
+                        </button>
+                        <button onClick={() => removeSnap(s.id)} className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all" title="Hapus jadwal">
                           <Trash2 size={14} />
                         </button>
                       </div>

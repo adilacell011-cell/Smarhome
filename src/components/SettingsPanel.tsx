@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe, RefreshCw } from 'lucide-react';
+import { Settings, Save, HelpCircle, HardDrive, Cpu, Terminal, CheckCircle, Lightbulb, Camera, Tv, Globe, RefreshCw, Send } from 'lucide-react';
 import type { SmartConfig } from '../types';
 
 interface SettingsPanelProps {
@@ -8,7 +8,7 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'wiz' | 'cctv' | 'tv' | 'router'>('wiz');
+  const [activeSubTab, setActiveSubTab] = useState<'wiz' | 'cctv' | 'tv' | 'router' | 'telegram'>('wiz');
   const [form, setForm] = useState<SmartConfig>({
     ...config,
     wizLamps: config.wizLamps || [
@@ -276,7 +276,7 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
         </div>
 
         {/* Sub-Tabs Selector for Mobile/PWA Optimization */}
-        <div className="grid grid-cols-4 gap-1.5 p-1 bg-zinc-950 rounded-2xl mb-5 border border-zinc-900 overflow-x-auto no-scrollbar">
+        <div className="grid grid-cols-5 gap-1.5 p-1 bg-zinc-950 rounded-2xl mb-5 border border-zinc-900 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveSubTab('wiz')}
@@ -324,6 +324,18 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
           >
             <Globe size={14} />
             <span className="hidden xs:inline">Router</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('telegram')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-1 rounded-xl text-[10px] font-extrabold transition-all duration-200 cursor-pointer ${
+              activeSubTab === 'telegram'
+                ? 'bg-[#F97316] text-white shadow-sm'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/50'
+            }`}
+          >
+            <Send size={14} />
+            <span className="hidden xs:inline">Telegram</span>
           </button>
         </div>
 
@@ -717,6 +729,40 @@ export default function SettingsPanel({ config, onSave }: SettingsPanelProps) {
                       className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Telegram Bot Setup */}
+          {activeSubTab === 'telegram' && (
+            <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-900 space-y-3 animate-fade-in">
+              <span className="text-[10px] font-black text-orange-400 tracking-widest block uppercase">Bot Telegram Snapshot</span>
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                Isi token bot dan Chat ID admin. Snapshot kamera akan dikirim otomatis ke chat ini sesuai jadwal yang Anda atur di menu CCTV.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Token Bot</label>
+                  <input
+                    type="password"
+                    value={form.telegramBotToken || ''}
+                    onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })}
+                    placeholder="123456789:ABCdef..."
+                    className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
+                  />
+                  <p className="text-[9px] text-zinc-600 mt-1 pl-0.5">Dapatkan dari @BotFather di Telegram.</p>
+                </div>
+                <div>
+                  <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider pl-0.5 mb-1 block">Chat ID Admin</label>
+                  <input
+                    type="text"
+                    value={form.telegramChatId || ''}
+                    onChange={(e) => setForm({ ...form, telegramChatId: e.target.value })}
+                    placeholder="Contoh: 123456789"
+                    className="w-full bg-zinc-900 border border-zinc-800/80 px-2.5 py-1.5 text-xs rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-[#F97316]/50 text-white placeholder-zinc-600 transition-all"
+                  />
+                  <p className="text-[9px] text-zinc-600 mt-1 pl-0.5">Dapatkan dari @userinfobot di Telegram.</p>
                 </div>
               </div>
             </div>

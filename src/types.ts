@@ -34,6 +34,8 @@ export type SmartConfig = {
   routerName: string;
   routerIp: string;
   routerPassword?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
 };
 
 export type WizState = {
@@ -109,4 +111,13 @@ export type LightSchedule = {
   time: string;
   days: number[];
   action: AutomationAction;
+};
+
+export type TelegramSnapSchedule = {
+  id: string;
+  name?: string;
+  enabled: boolean;
+  time: string;
+  days: number[];
+  cameraId: string; // a specific camera id or "all"
 };
