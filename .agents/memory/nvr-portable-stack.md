@@ -62,10 +62,17 @@ Deployed to the user's own LAN server via Dockge, not Replit. Non-obvious constr
 - Persist `./config` (login + device settings, incl. gitignored device-config.json) and `./data`
   (recordings/thumbs/db) as volumes, or the user loses everything on container recreate.
 - Image published to GHCR via GitHub Actions; target is an arm64 STB/Armbian SBC, so build linux/arm64 ONLY.
-- arm64 `npm install` crashes with `npm error Exit handler never called!` → exit 1. ROOT CAUSE: a bug in
-  npm 10.x (the version bundled with node:22-bookworm-slim). It is NOT an OOM (OOM-kill = exit 137 with no
-  npm message) and NOT QEMU emulation (it ALSO fails on GitHub's native arm64 runner). FIX: upgrade npm
-  before installing — `RUN npm install -g npm@11.17.0 && npm install ...` in BOTH Dockerfile stages.
+- REAL ROOT CAUSE of off-Replit `npm install` failures: package-lock.json is generated inside Replit, whose
+  npm registry is an internal proxy, so some "resolved" URLs point to `http://package-firewall.replit.local/npm/...`
+  which does NOT resolve outside Replit → `npm error code ENOTFOUND ... package-firewall.replit.local`. This is
+  why builds SUCCEED locally (inside Replit the host resolves) but FAIL on GitHub. NOT RAM, NOT arm64, NOT QEMU.
+  FIX: rewrite those URLs to the public registry — the proxy mirrors the registry path layout so a host swap
+  yields valid URLs and integrity hashes still match:
+  `sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json`.
+  Do it in BOTH Dockerfile stages (safety net) AND fix the committed lockfile. Verify: `grep -c replit.local package-lock.json` == 0.
+- npm 10.x (bundled with node:22-bookworm-slim) MASKED the above as a cryptic `npm error Exit handler never
+  called!` (exit 1) — a red herring that looked like OOM/arch. `npm install -g npm@11.17.0` before install
+  surfaces the real error; keep the upgrade for clearer diagnostics.
 - Still use a native arm64 GitHub runner (`runs-on: ubuntu-24.04-arm`, free for public repos, no setup-qemu,
   `platforms: linux/arm64`) — faster/cheaper than QEMU. Native amd64 build of this Dockerfile succeeds.
   NOTE: arm64 build cannot be reproduced in the Replit sandbox (privileged binfmt install is blocked), so

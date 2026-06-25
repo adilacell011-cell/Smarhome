@@ -4,15 +4,17 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# Install ALL dependencies (incl. dev) needed to build.
-# Use `npm install` (not `npm ci`): more tolerant of platform-specific
-# optional native packages (rollup/lightningcss/tailwind-oxide).
-#
-# Upgrade npm first: the npm 10.x bundled with node:22 crashes on arm64
-# during install with "npm error Exit handler never called!" (a bug in npm
-# itself, not an OOM — it exits 1, not 137). npm 11.x fixes it.
+# package-lock.json is generated inside Replit, whose npm registry is an
+# internal proxy. Some of its "resolved" URLs point to
+# package-firewall.replit.local, which does NOT exist outside Replit — that
+# made every off-Replit `npm install` fail (ENOTFOUND). Rewrite those URLs to
+# the public npm registry (identical path layout; integrity hashes still
+# match). Safety net in case the lockfile gets re-poisoned by a Replit install.
+# Also bump npm: the bundled npm 10.x masked this as a cryptic
+# "Exit handler never called!"; npm 11.x reports the real error.
 COPY package*.json ./
-RUN npm install -g npm@11.17.0 \
+RUN sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json \
+    && npm install -g npm@11.17.0 \
     && npm install --no-audit --no-fund
 
 # Build the frontend (Vite) and bundle the server (esbuild) into /app/dist
@@ -37,7 +39,9 @@ ENV PORT=5000
 # Kept at runtime because: (1) the server imports "vite" at the top level, and
 # (2) sql.js + TensorFlow WASM assets are resolved from node_modules on disk.
 COPY package*.json ./
-RUN npm install -g npm@11.17.0 \
+# Same Replit-proxy URL rewrite as the builder stage (see note above).
+RUN sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json \
+    && npm install -g npm@11.17.0 \
     && npm install --omit=dev --no-audit --no-fund \
     && npm cache clean --force
 
