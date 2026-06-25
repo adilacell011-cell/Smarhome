@@ -94,7 +94,7 @@ function writeConfig(config: typeof DEFAULT_CONFIG) {
 async function startServer() {
   const app = express();
   app.use(express.json());
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 5000;
 
   // Initial config load
   let deviceConfig = readConfig();
@@ -566,7 +566,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
