@@ -4,9 +4,12 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# Install ALL dependencies (incl. dev) needed to build
+# Install ALL dependencies (incl. dev) needed to build.
+# Use `npm install` (not `npm ci`): more tolerant of platform-specific
+# optional native packages (rollup/lightningcss/tailwind-oxide) during
+# cross-architecture (arm64 via QEMU) builds.
 COPY package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
 
 # Build the frontend (Vite) and bundle the server (esbuild) into /app/dist
 COPY . .
@@ -30,7 +33,7 @@ ENV PORT=5000
 # Kept at runtime because: (1) the server imports "vite" at the top level, and
 # (2) sql.js + TensorFlow WASM assets are resolved from node_modules on disk.
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # Bundled server + built frontend
 COPY --from=builder /app/dist ./dist
