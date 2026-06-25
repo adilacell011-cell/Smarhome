@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Lightbulb, Power, Sliders, Palette, RefreshCw, FolderOpen, User, Layers, CheckCircle, Pencil } from 'lucide-react';
-import type { WizState, WizLampConfig } from '../types';
+import { useState, useEffect, useCallback } from 'react';
+import { Lightbulb, Power, Sliders, Palette, RefreshCw, FolderOpen, User, Layers, CheckCircle, Pencil, Clock, Plus, Trash2 } from 'lucide-react';
+import type { WizState, WizLampConfig, LightSchedule } from '../types';
 
 interface WizControlProps {
   wizName?: string;
@@ -691,6 +691,229 @@ export default function WizControl({ wizName, wizIp, wizPort, wizLamps, onEditLa
           {loading ? <RefreshCw className="animate-spin text-[#F97316] mr-2 shrink-0" size={12} /> : null}
           <span>{statusMessage}</span>
         </div>
+      )}
+
+      {/* Time-based light scheduler */}
+      <LightScheduler lamps={lamps} />
+    </div>
+  );
+}
+
+const DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function LightScheduler({ lamps }: { lamps: WizLampConfig[] }) {
+  const [schedules, setSchedules] = useState<LightSchedule[]>([]);
+  const [time, setTime] = useState('18:00');
+  const [deviceId, setDeviceId] = useState('all');
+  const [command, setCommand] = useState<'on' | 'off'>('on');
+  const [days, setDays] = useState<number[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const lampOptions = [{ id: 'all', name: 'Semua Lampu' }, ...lamps.map((l) => ({ id: l.id, name: l.name }))];
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/nvr/schedules');
+      const d = await r.json();
+      if (d.success) setSchedules(d.schedules);
+    } catch {
+      /* offline / not on LAN */
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const persist = async (next: LightSchedule[]) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch('/api/nvr/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules: next }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setSchedules(d.schedules);
+        setMsg('Jadwal disimpan');
+      } else {
+        setMsg(d.message || 'Gagal menyimpan jadwal');
+      }
+    } catch {
+      setMsg('Gagal terhubung ke server');
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  const toggleDay = (d: number) => {
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  };
+
+  const addSchedule = () => {
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      setMsg('Format jam tidak valid');
+      return;
+    }
+    const lampName = lampOptions.find((l) => l.id === deviceId)?.name || 'Lampu';
+    const newSchedule: LightSchedule = {
+      id: `sch-${Date.now()}`,
+      name: `${lampName} ${command === 'on' ? 'Nyala' : 'Mati'} ${time}`,
+      enabled: true,
+      time,
+      days,
+      action: { deviceType: 'wiz', deviceId, command },
+    };
+    persist([...schedules, newSchedule]);
+  };
+
+  const toggleSchedule = (id: string) => {
+    persist(schedules.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
+  };
+
+  const removeSchedule = async (id: string) => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/nvr/schedules/${id}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.success) setSchedules(d.schedules);
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const daysLabel = (ds: number[]) => (ds.length === 0 ? 'Setiap hari' : ds.map((d) => DAY_LABELS[d]).join(', '));
+
+  return (
+    <div className="bg-zinc-950/40 rounded-2xl p-4 border border-zinc-800/60 space-y-4">
+      <div className="flex items-center gap-2">
+        <div className="p-2 rounded-xl bg-orange-500/10 text-[#F97316] border border-orange-500/20">
+          <Clock size={16} />
+        </div>
+        <div>
+          <h3 className="font-extrabold text-white text-sm tracking-wide uppercase">Jadwal Lampu Otomatis</h3>
+          <p className="text-[10px] text-zinc-500">Nyalakan / matikan lampu otomatis pada jam tertentu</p>
+        </div>
+      </div>
+
+      {/* Form aturan baru */}
+      <div className="bg-zinc-900/50 rounded-xl border border-zinc-800/70 p-3 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest pl-0.5 block">Jam</label>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="w-full bg-[#1C1C1F] border border-zinc-800 text-xs font-bold text-white rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-[#F97316]/50"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest pl-0.5 block">Aksi</label>
+            <div className="flex bg-[#1C1C1F] p-1 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setCommand('on')}
+                className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all cursor-pointer ${command === 'on' ? 'bg-[#F97316] text-white' : 'text-zinc-500'}`}
+              >
+                Nyala
+              </button>
+              <button
+                onClick={() => setCommand('off')}
+                className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all cursor-pointer ${command === 'off' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}
+              >
+                Mati
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest pl-0.5 block">Lampu</label>
+          <select
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            className="w-full bg-[#1C1C1F] border border-zinc-800 text-xs font-bold text-[#F97316] rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-[#F97316]/50"
+          >
+            {lampOptions.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest pl-0.5 block">Hari (kosongkan = setiap hari)</label>
+          <div className="flex flex-wrap gap-1.5">
+            {DAY_LABELS.map((label, idx) => (
+              <button
+                key={label}
+                onClick={() => toggleDay(idx)}
+                className={`px-2.5 py-1.5 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                  days.includes(idx)
+                    ? 'bg-[#F97316] text-white border-[#F97316]'
+                    : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={addSchedule}
+          disabled={busy}
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-[#F97316] text-white text-xs font-black uppercase tracking-wider rounded-xl hover:bg-orange-600 transition-all cursor-pointer disabled:opacity-50"
+        >
+          <Plus size={14} /> Tambah Jadwal
+        </button>
+      </div>
+
+      {/* Daftar jadwal */}
+      {schedules.length === 0 ? (
+        <p className="text-[10px] text-zinc-600 text-center py-3">Belum ada jadwal. Tambahkan di atas.</p>
+      ) : (
+        <div className="space-y-2">
+          {schedules.map((s) => (
+            <div key={s.id} className="p-3 bg-zinc-900/40 rounded-xl border border-zinc-800/60 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className={`font-mono font-black text-base ${s.enabled ? 'text-[#F97316]' : 'text-zinc-600'}`}>{s.time}</span>
+                <div className="min-w-0">
+                  <p className={`text-xs font-bold truncate ${s.enabled ? 'text-white' : 'text-zinc-500'}`}>
+                    {(lampOptions.find((l) => l.id === s.action.deviceId)?.name) || 'Lampu'} · {s.action.command === 'on' ? 'Nyala' : 'Mati'}
+                  </p>
+                  <p className="text-[9px] text-zinc-500 truncate">{daysLabel(s.days)}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => toggleSchedule(s.id)}
+                  className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg border transition-all cursor-pointer ${
+                    s.enabled
+                      ? 'bg-orange-500/10 text-[#F97316] border-orange-500/20'
+                      : 'bg-zinc-950 text-zinc-500 border-zinc-900'
+                  }`}
+                >
+                  {s.enabled ? 'Aktif' : 'Nonaktif'}
+                </button>
+                <button
+                  onClick={() => removeSchedule(s.id)}
+                  className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                  title="Hapus jadwal"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {msg && (
+        <div className="text-[10px] font-mono font-medium text-center text-[#F97316] animate-fade-in">{msg}</div>
       )}
     </div>
   );

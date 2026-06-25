@@ -101,3 +101,12 @@ export type NvrDevices = {
   cameras: Array<{ id: string; name: string }>;
   tv: { id: string; name: string } | null;
 };
+
+export type LightSchedule = {
+  id: string;
+  name?: string;
+  enabled: boolean;
+  time: string;
+  days: number[];
+  action: AutomationAction;
+};

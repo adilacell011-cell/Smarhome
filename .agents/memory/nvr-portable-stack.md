@@ -46,3 +46,15 @@ awaited (don't block the analysis loop). Hard constraints learned in review:
   in `saveRules` validation, clamp `cooldownSec` (0..3600), cap rule count.
 - Rule file writes are atomic (tmp + fsync + rename); on a corrupt file, KEEP last-known-good,
   do not silently reset to `[]` (would wipe all automations on one bad parse).
+- Full-set "replace" endpoints (rules AND light schedules — UI POSTs the entire list) must be
+  FAIL-CLOSED: reject the whole batch (`saveRules`/`saveSchedules` return null -> route 400) if
+  ANY item is invalid. Never persist a filtered subset — a single malformed entry would silently
+  delete all the user's saved rules/schedules.
+
+## Light scheduler (time-based) — same `nvr/automation.ts`
+Schedules ("turn lamp X on/off at HH:MM on chosen days") persist to `config/light-schedules.json`
+and reuse `runAction` (WiZ UDP). A single `setInterval(tickSchedules, 20000)` checks every 20s and
+fires any schedule matching the current minute AT MOST ONCE per minute via a `schedLastFired`
+minute-key guard. `initAutomation` clears the prior interval before starting a new one (no leak on
+restart). `days` is `number[]` 0=Sun..6=Sat; empty = every day. UI lives in WizControl.tsx
+(`LightScheduler`), lamp options come from the `wizLamps` prop ("all" works even for single legacy lamp).

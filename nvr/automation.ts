@@ -19,50 +19,64 @@ export type AutomationRule = {
   cooldownSec: number;
 };
 
+// Time-based schedule: run an action at a fixed time on chosen days (e.g. lights on at 18:00).
+export type Schedule = {
+  id: string;
+  name?: string;
+  enabled: boolean;
+  time: string;     // "HH:MM" 24h
+  days: number[];   // 0..6 (0=Sun); empty = every day
+  action: RuleAction;
+};
+
 type GetConfig = () => any;
 
 const RULES_FILE = path.join(process.cwd(), "config", "automation-rules.json");
+const SCHEDULES_FILE = path.join(process.cwd(), "config", "light-schedules.json");
 
 let getConfig: GetConfig = () => ({});
 let rules: AutomationRule[] = [];
+let schedules: Schedule[] = [];
 const lastFired = new Map<string, number>(); // ruleId -> ts
-
-function loadRules() {
-  try {
-    if (fs.existsSync(RULES_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(RULES_FILE, "utf-8"));
-      // Only adopt valid content; on a corrupt/partial file keep the last-known-good
-      // (empty on first boot) rather than silently behaving as if there are no rules.
-      if (Array.isArray(parsed)) rules = parsed;
-      else console.error("[NVR Auto] File aturan bukan array, diabaikan");
-    }
-  } catch (err) {
-    console.error("[NVR Auto] Gagal memuat aturan (file mungkin rusak, mempertahankan yang lama):", err);
-  }
-}
+const schedLastFired = new Map<string, string>(); // scheduleId -> minute key
+let schedTimer: ReturnType<typeof setInterval> | null = null;
 
 // Atomic write: temp file + fsync + rename, so a crash mid-write cannot truncate the file.
-function saveRulesFile() {
+function atomicWriteJson(file: string, data: any) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  const fd = fs.openSync(tmp, "w");
   try {
-    fs.mkdirSync(path.dirname(RULES_FILE), { recursive: true });
-    const tmp = `${RULES_FILE}.tmp`;
-    const fd = fs.openSync(tmp, "w");
-    try {
-      fs.writeSync(fd, JSON.stringify(rules, null, 2));
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(tmp, RULES_FILE);
+    fs.writeSync(fd, JSON.stringify(data, null, 2));
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+}
+
+// Returns the parsed array, or null if the file is missing/corrupt (caller keeps last-known-good).
+function loadJsonArray(file: string): any[] | null {
+  try {
+    if (!fs.existsSync(file)) return null;
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return Array.isArray(parsed) ? parsed : null;
   } catch (err) {
-    console.error("[NVR Auto] Gagal menyimpan aturan:", err);
+    console.error(`[NVR Auto] Gagal memuat ${path.basename(file)} (file mungkin rusak, mempertahankan yang lama):`, err);
+    return null;
   }
 }
 
 export function initAutomation(cfgGetter: GetConfig) {
   getConfig = cfgGetter;
-  loadRules();
-  console.log(`[NVR Auto] ${rules.length} aturan otomatis dimuat`);
+  const r = loadJsonArray(RULES_FILE);
+  if (r) rules = r;
+  const s = loadJsonArray(SCHEDULES_FILE);
+  if (s) schedules = s;
+  if (schedTimer) clearInterval(schedTimer);
+  // Check every 20s; each matching minute fires at most once (guarded by schedLastFired).
+  schedTimer = setInterval(tickSchedules, 20000);
+  console.log(`[NVR Auto] ${rules.length} aturan otomatis & ${schedules.length} jadwal lampu dimuat`);
 }
 
 export function listRules(): AutomationRule[] {
@@ -72,41 +86,97 @@ export function listRules(): AutomationRule[] {
 const WIZ_CMDS = new Set(["on", "off"]);
 const TV_CMDS = new Set(["power", "youtube", "mute", "home"]);
 const MAX_RULES = 50;
+const MAX_SCHEDULES = 50;
 
-function validRule(r: any): r is AutomationRule {
-  if (!r || typeof r.id !== "string" || !r.action) return false;
-  const a = r.action;
-  if (a.deviceType === "wiz") { if (!WIZ_CMDS.has(a.command)) return false; }
-  else if (a.deviceType === "tv") { if (!TV_CMDS.has(a.command)) return false; }
-  else return false;
-  if (typeof a.deviceId !== "string") return false;
-  return true;
+function validAction(a: any): a is RuleAction {
+  if (!a || typeof a.deviceId !== "string") return false;
+  if (a.deviceType === "wiz") return WIZ_CMDS.has(a.command);
+  if (a.deviceType === "tv") return TV_CMDS.has(a.command);
+  return false;
 }
 
-// Replace the full rule list (the UI sends the complete set). Sanitises each rule and
-// bounds the total count to prevent trigger amplification.
-export function saveRules(next: AutomationRule[]): AutomationRule[] {
-  rules = (next || [])
-    .filter(validRule)
-    .slice(0, MAX_RULES)
-    .map((r) => ({
-      id: r.id,
-      name: typeof r.name === "string" ? r.name.slice(0, 80) : undefined,
-      enabled: !!r.enabled,
-      cameraId: typeof r.cameraId === "string" ? r.cameraId : "any",
-      label: typeof r.label === "string" ? r.label : "any",
-      action: { deviceType: r.action.deviceType, deviceId: r.action.deviceId, command: r.action.command },
-      cooldownSec: Math.max(0, Math.min(3600, Number(r.cooldownSec) || 0)),
-    }));
-  saveRulesFile();
+function validRule(r: any): r is AutomationRule {
+  return !!r && typeof r.id === "string" && validAction(r.action);
+}
+
+// Replace the full rule list (the UI sends the complete set). Fail-closed: if any item is
+// invalid or the count is exceeded, reject the whole batch (returns null) WITHOUT overwriting
+// the existing rules — otherwise one malformed payload could silently wipe all rules.
+export function saveRules(next: AutomationRule[]): AutomationRule[] | null {
+  const arr = Array.isArray(next) ? next : [];
+  if (arr.length > MAX_RULES || !arr.every(validRule)) return null;
+  rules = arr.map((r) => ({
+    id: r.id,
+    name: typeof r.name === "string" ? r.name.slice(0, 80) : undefined,
+    enabled: !!r.enabled,
+    cameraId: typeof r.cameraId === "string" ? r.cameraId : "any",
+    label: typeof r.label === "string" ? r.label : "any",
+    action: { deviceType: r.action.deviceType, deviceId: r.action.deviceId, command: r.action.command },
+    cooldownSec: Math.max(0, Math.min(3600, Number(r.cooldownSec) || 0)),
+  }));
+  atomicWriteJson(RULES_FILE, rules);
   return rules;
 }
 
 export function deleteRule(id: string): boolean {
   const before = rules.length;
   rules = rules.filter((r) => r.id !== id);
-  if (rules.length !== before) { saveRulesFile(); return true; }
+  if (rules.length !== before) { atomicWriteJson(RULES_FILE, rules); return true; }
   return false;
+}
+
+// ---- Time-based light schedules ----
+
+function validSchedule(s: any): s is Schedule {
+  if (!s || typeof s.id !== "string" || !validAction(s.action)) return false;
+  if (typeof s.time !== "string" || !/^\d{2}:\d{2}$/.test(s.time)) return false;
+  const [h, m] = s.time.split(":").map(Number);
+  return h <= 23 && m <= 59;
+}
+
+export function listSchedules(): Schedule[] {
+  return schedules;
+}
+
+// Fail-closed like saveRules: reject the whole batch (returns null) without overwriting
+// existing schedules if any item is invalid, so a malformed payload can't wipe schedules.
+export function saveSchedules(next: Schedule[]): Schedule[] | null {
+  const arr = Array.isArray(next) ? next : [];
+  if (arr.length > MAX_SCHEDULES || !arr.every(validSchedule)) return null;
+  schedules = arr.map((s) => ({
+    id: s.id,
+    name: typeof s.name === "string" ? s.name.slice(0, 80) : undefined,
+    enabled: !!s.enabled,
+    time: s.time,
+    days: Array.isArray(s.days) ? s.days.filter((d: any) => Number.isInteger(d) && d >= 0 && d <= 6) : [],
+    action: { deviceType: s.action.deviceType, deviceId: s.action.deviceId, command: s.action.command },
+  }));
+  atomicWriteJson(SCHEDULES_FILE, schedules);
+  return schedules;
+}
+
+export function deleteSchedule(id: string): boolean {
+  const before = schedules.length;
+  schedules = schedules.filter((s) => s.id !== id);
+  if (schedules.length !== before) { atomicWriteJson(SCHEDULES_FILE, schedules); return true; }
+  return false;
+}
+
+// Runs on an interval; fires any schedule whose time/day matches the current minute, once per minute.
+function tickSchedules() {
+  const now = new Date();
+  const cur = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const day = now.getDay();
+  const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${cur}`;
+  for (const s of schedules) {
+    if (!s.enabled || s.time !== cur) continue;
+    if (s.days.length > 0 && !s.days.includes(day)) continue;
+    if (schedLastFired.get(s.id) === minuteKey) continue;
+    schedLastFired.set(s.id, minuteKey);
+    runAction(s.action)
+      .then((res) => console.log(`[NVR Sched] Jadwal "${s.name || s.id}" (${cur}): ${res.detail}`))
+      .catch((err) => console.error(`[NVR Sched] Jadwal "${s.name || s.id}" gagal:`, err));
+  }
 }
 
 // ---- Device control ----

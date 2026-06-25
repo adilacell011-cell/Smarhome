@@ -11,6 +11,7 @@ import {
 } from "./detector";
 import {
   initAutomation, listRules, saveRules, deleteRule, runAction, type AutomationRule,
+  listSchedules, saveSchedules, deleteSchedule, type Schedule,
 } from "./automation";
 
 type GetConfig = () => any;
@@ -113,6 +114,7 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
     const incoming = req.body?.rules;
     if (!Array.isArray(incoming)) return res.status(400).json({ success: false, message: "Format aturan tidak valid" });
     const saved = saveRules(incoming as AutomationRule[]);
+    if (!saved) return res.status(400).json({ success: false, message: "Ada aturan tidak valid; tidak ada yang diubah" });
     res.json({ success: true, rules: saved });
   });
 
@@ -127,6 +129,25 @@ export async function registerNvr(app: Express, getConfig: GetConfig) {
     if (!action || !action.deviceType) return res.status(400).json({ success: false, message: "Aksi tidak valid" });
     const result = await runAction(action);
     res.json({ success: result.ok, message: result.detail });
+  });
+
+  // ---- Light schedules: "turn lamp X on/off at HH:MM on chosen days" ----
+
+  app.get("/api/nvr/schedules", (req: Request, res: Response) => {
+    res.json({ success: true, schedules: listSchedules() });
+  });
+
+  app.post("/api/nvr/schedules", (req: Request, res: Response) => {
+    const incoming = req.body?.schedules;
+    if (!Array.isArray(incoming)) return res.status(400).json({ success: false, message: "Format jadwal tidak valid" });
+    const saved = saveSchedules(incoming as Schedule[]);
+    if (!saved) return res.status(400).json({ success: false, message: "Ada jadwal tidak valid (cek jam); tidak ada yang diubah" });
+    res.json({ success: true, schedules: saved });
+  });
+
+  app.delete("/api/nvr/schedules/:id", (req: Request, res: Response) => {
+    const ok = deleteSchedule(req.params.id);
+    res.json({ success: ok, schedules: listSchedules() });
   });
 
   // Stream a recording with HTTP range support (for seeking in the player)
