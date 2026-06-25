@@ -5,6 +5,9 @@ import net from "net";
 import dgram from "dgram";
 import { exec } from "child_process";
 import { createServer as createViteServer } from "vite";
+import onvif from "onvif";
+
+const { Cam } = onvif;
 
 // Helper function to check if a TCP port is open (Ping substitute for port-level verification)
 function checkTcpPort(port: number, host: string, timeout = 1200): Promise<boolean> {
@@ -89,6 +92,15 @@ function writeConfig(config: typeof DEFAULT_CONFIG) {
     console.error("Gagal menyimpan file konfigurasi:", err);
     return false;
   }
+}
+
+// Extract username/password from an RTSP URL (rtsp://user:pass@ip:port/...)
+function parseRtspCreds(rtspUrl?: string): { username: string; password: string } {
+  const fallback = { username: "admin", password: "" };
+  if (!rtspUrl) return fallback;
+  const match = rtspUrl.match(/^rtsp:\/\/([^:@/]+):([^@/]*)@/i);
+  if (match) return { username: decodeURIComponent(match[1]), password: decodeURIComponent(match[2]) };
+  return fallback;
 }
 
 async function startServer() {
@@ -378,11 +390,71 @@ async function startServer() {
   });
 
   // 2. CCTV ICSee Controls (RTSP, Snapshot & PTZ)
-  app.post("/api/icsee/ptz", (req, res) => {
-    const { direction, ip } = req.body; // 'up', 'down', 'left', 'right', 'zoom_in', 'zoom_out'
+  app.post("/api/icsee/ptz", async (req, res) => {
+    const { direction, ip, onvifPort } = req.body; // 'up', 'down', 'left', 'right', 'zoom_in', 'zoom_out'
     const targetIp = ip || deviceConfig.icseeIp;
-    console.log(`[ICSee PTZ] Menggerakkan kamera di ${targetIp} ke arah: ${direction}`);
-    res.json({ success: true, message: `Kamera bergerak ke ${direction}` });
+
+    // Velocity vector for ONVIF ContinuousMove
+    const speed = 0.6;
+    const velocity = { x: 0, y: 0, zoom: 0 };
+    switch (direction) {
+      case "up": velocity.y = speed; break;
+      case "down": velocity.y = -speed; break;
+      case "left": velocity.x = -speed; break;
+      case "right": velocity.x = speed; break;
+      case "zoom_in": velocity.zoom = speed; break;
+      case "zoom_out": velocity.zoom = -speed; break;
+      default:
+        return res.status(400).json({ success: false, message: `Arah PTZ tidak valid: ${direction}` });
+    }
+
+    // Only allow PTZ against cameras that are actually configured (prevents arbitrary internal host probing)
+    const allowedIps = new Set<string>([
+      deviceConfig.icseeIp,
+      ...((deviceConfig.cctvs || []).map((c: any) => c.ip))
+    ].filter(Boolean));
+    if (!allowedIps.has(targetIp)) {
+      return res.status(403).json({ success: false, message: `Kamera ${targetIp} tidak terdaftar di konfigurasi.` });
+    }
+
+    // Look up credentials from the matching camera's RTSP URL
+    const camConfig = (deviceConfig.cctvs || []).find((c: any) => c.ip === targetIp);
+    const { username, password } = parseRtspCreds(camConfig?.rtspUrl || deviceConfig.icseeRtspUrl);
+    const port = parseInt(onvifPort) || 8899; // common ONVIF port for Xiongmai/iCSee cameras
+
+    console.log(`[ICSee PTZ ONVIF] ${targetIp}:${port} -> arah ${direction}`);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
+
+        // Overall operation deadline so the request never hangs indefinitely
+        const overallTimeout = setTimeout(() => finish(() => reject(new Error("Operation timeout"))), 8000);
+
+        const camera = new Cam(
+          { hostname: targetIp, username, password, port, timeout: 4000 },
+          function (this: any, err: any) {
+            if (err) return finish(() => { clearTimeout(overallTimeout); reject(err); });
+            camera.continuousMove(velocity, (moveErr: any) => {
+              if (moveErr) return finish(() => { clearTimeout(overallTimeout); reject(moveErr); });
+              // Short burst then stop, mimicking a tap-to-pan control
+              setTimeout(() => {
+                camera.stop({ panTilt: true, zoom: true }, () => finish(() => { clearTimeout(overallTimeout); resolve(); }));
+              }, 600);
+            });
+          }
+        );
+      });
+      res.json({ success: true, message: `Kamera ${targetIp} bergerak ke ${direction}` });
+    } catch (error: any) {
+      console.error("[ICSee PTZ Error]", error?.message || error);
+      res.status(502).json({
+        success: false,
+        message: `Gagal mengontrol PTZ kamera di ${targetIp}. Pastikan kamera mendukung ONVIF, berada di jaringan yang sama, dan port/kredensial benar.`,
+        error: String(error?.message || error)
+      });
+    }
   });
 
   // Real Connection Port Scanner for real-time camera inspection (ketika uji link kasih repon nyata!)
@@ -566,6 +638,42 @@ async function startServer() {
   app.post("/api/router/reboot", (req, res) => {
     console.log(`[Fiberhome] Melakukan reboot router di ${deviceConfig.routerIp}`);
     res.json({ success: true, message: "Router sedang melakukan booting ulang..." });
+  });
+
+  // Real internet speed test (download/upload/ping) using Cloudflare's public speed endpoints
+  app.get("/api/router/speedtest", async (req, res) => {
+    try {
+      // Ping: latency of a tiny request
+      const pingStart = Date.now();
+      await fetch("https://speed.cloudflare.com/__down?bytes=1000");
+      const pingMs = Date.now() - pingStart;
+
+      // Download: pull ~10MB and measure throughput
+      const downBytes = 10_000_000;
+      const dStart = Date.now();
+      const dResp = await fetch(`https://speed.cloudflare.com/__down?bytes=${downBytes}`);
+      const dBuf = await dResp.arrayBuffer();
+      const dSec = Math.max((Date.now() - dStart) / 1000, 0.001);
+      const downloadSpeed = +((dBuf.byteLength * 8) / dSec / 1_000_000).toFixed(1); // Mbps
+
+      // Upload: push ~5MB and measure throughput
+      const upBytes = 5_000_000;
+      const payload = new Uint8Array(upBytes);
+      const uStart = Date.now();
+      await fetch("https://speed.cloudflare.com/__up", {
+        method: "POST",
+        body: payload,
+        headers: { "Content-Type": "application/octet-stream" }
+      });
+      const uSec = Math.max((Date.now() - uStart) / 1000, 0.001);
+      const uploadSpeed = +((upBytes * 8) / uSec / 1_000_000).toFixed(1); // Mbps
+
+      console.log(`[Speedtest] down=${downloadSpeed}Mbps up=${uploadSpeed}Mbps ping=${pingMs}ms`);
+      res.json({ success: true, download: downloadSpeed, upload: uploadSpeed, ping: pingMs });
+    } catch (error: any) {
+      console.error("[Speedtest Error]", error?.message || error);
+      res.status(502).json({ success: false, message: "Gagal menjalankan speed test", error: String(error?.message || error) });
+    }
   });
 
   // Vite middleware for development

@@ -1,0 +1,1 @@
+- [LAN device constraint](lan-device-constraint.md) — this dashboard controls home-LAN devices (WiZ/CCTV/TV/router); cloud deploy can't reach them, real device features only work when run on the home network.

@@ -82,17 +82,24 @@ export default function CctvControl({ icseeName, icseeIp, cctvs }: CctvControlPr
   };
 
   const handlePtz = async (direction: string) => {
-    setPtzMessage(`Panning PTZ camera: ${direction.toUpperCase()}...`);
+    setPtzMessage(`Menggerakkan kamera: ${direction.toUpperCase()}...`);
     try {
-      await fetch('/api/icsee/ptz', {
+      const res = await fetch('/api/icsee/ptz', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({ direction, ip: activeIp }),
       });
+      const data = await res.json();
+      setPtzMessage(
+        data.success
+          ? `Kamera bergerak ke ${direction.toUpperCase()}`
+          : (data.message || 'Gagal menggerakkan kamera')
+      );
     } catch (err) {
       console.error(err);
+      setPtzMessage('Gagal terhubung ke kamera');
     }
-    setTimeout(() => setPtzMessage(null), 2500);
+    setTimeout(() => setPtzMessage(null), 3500);
   };
 
   const handleAiScan = () => {

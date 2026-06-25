@@ -41,29 +41,30 @@ export default function RouterControl({ routerName, routerIp }: RouterControlPro
     }
   };
 
-  const runSpeedtest = () => {
+  const runSpeedtest = async () => {
     setTestingSpeed(true);
-    setSystemLog("Connecting speedtest engine...");
-    setTimeout(() => {
-      setSystemLog("Testing packet download stream...");
-      setTimeout(() => {
-        setSystemLog("Testing packet upload stream...");
-        setTimeout(() => {
-          const finalDownload = +(85 + Math.random() * 20).toFixed(1);
-          const finalUpload = +(20 + Math.random() * 10).toFixed(1);
-          const finalPing = Math.floor(10 + Math.random() * 8);
-          setStatus(prev => ({
-            ...prev,
-            downloadSpeed: finalDownload,
-            uploadSpeed: finalUpload,
-            pingMs: finalPing
-          }));
-          setTestingSpeed(false);
-          setSystemLog("Speedtest operation complete!");
-          setTimeout(() => setSystemLog(null), 3000);
-        }, 1500);
-      }, 1500);
-    }, 1200);
+    setSystemLog("Menjalankan speed test (download & upload)...");
+    try {
+      const response = await fetch('/api/router/speedtest');
+      const data = await response.json();
+      if (data.success) {
+        setStatus(prev => ({
+          ...prev,
+          downloadSpeed: data.download,
+          uploadSpeed: data.upload,
+          pingMs: data.ping
+        }));
+        setSystemLog("Speed test selesai!");
+      } else {
+        setSystemLog(`Speed test gagal: ${data.message || 'tidak diketahui'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setSystemLog("Speed test gagal terhubung ke server.");
+    } finally {
+      setTestingSpeed(false);
+      setTimeout(() => setSystemLog(null), 3000);
+    }
   };
 
   const handleReboot = async () => {
