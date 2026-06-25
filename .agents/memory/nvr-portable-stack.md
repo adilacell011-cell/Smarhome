@@ -62,14 +62,16 @@ Deployed to the user's own LAN server via Dockge, not Replit. Non-obvious constr
 - Persist `./config` (login + device settings, incl. gitignored device-config.json) and `./data`
   (recordings/thumbs/db) as volumes, or the user loses everything on container recreate.
 - Image published to GHCR via GitHub Actions; target is an arm64 STB/Armbian SBC, so build linux/arm64 ONLY.
-- DO NOT build arm64 via QEMU emulation (docker buildx on ubuntu-latest). Even with no native node addons,
-  the heavy `npm install` (TensorFlow tree) under QEMU crashes with OOM: `npm error Exit handler never called!`
-  → build fails (exit 1). Fix that worked: run the workflow on GitHub's NATIVE arm64 runner
-  (`runs-on: ubuntu-24.04-arm`, free for public repos), no setup-qemu, `platforms: linux/arm64`.
-  Native amd64 build (and native arm64) of this Dockerfile succeeds; only emulated arm64 fails.
-- Also use `npm install` (not `npm ci`) in the Dockerfile — more tolerant of platform-specific optional
-  native pkgs (rollup/lightningcss/tailwind-oxide). Building on the low-power STB itself is also too heavy
-  (slow + RAM risk); prefer build-on-GitHub-then-pull, STB only does `docker pull` (light).
+- arm64 `npm install` crashes with `npm error Exit handler never called!` → exit 1. ROOT CAUSE: a bug in
+  npm 10.x (the version bundled with node:22-bookworm-slim). It is NOT an OOM (OOM-kill = exit 137 with no
+  npm message) and NOT QEMU emulation (it ALSO fails on GitHub's native arm64 runner). FIX: upgrade npm
+  before installing — `RUN npm install -g npm@11.17.0 && npm install ...` in BOTH Dockerfile stages.
+- Still use a native arm64 GitHub runner (`runs-on: ubuntu-24.04-arm`, free for public repos, no setup-qemu,
+  `platforms: linux/arm64`) — faster/cheaper than QEMU. Native amd64 build of this Dockerfile succeeds.
+  NOTE: arm64 build cannot be reproduced in the Replit sandbox (privileged binfmt install is blocked), so
+  arm64-only fixes must be verified by pushing to GitHub Actions.
+- Use `npm install` (not `npm ci`); building on the low-power STB itself is too heavy (slow + RAM risk),
+  prefer build-on-GitHub-then-pull, STB only does `docker pull` (light).
 
 ## App login gate — `server.ts`
 The whole dashboard is behind a mandatory login. Credentials live in dashboard config
